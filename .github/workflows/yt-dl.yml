@@ -1,0 +1,42 @@
+name: yt-dl
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: "YouTube video URL"
+        required: true
+      filename:
+        description: "Output filename (no extension)"
+        required: false
+        default: "video"
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Install yt-dlp + bgutil PO Token provider
+        run: |
+          pip install -U yt-dlp bgutil-ytdlp-pot-provider
+          git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
+          cd /tmp/bg/server
+          npm ci --ignore-scripts
+          npx tsc
+          mkdir -p $HOME/bgutil-ytdlp-pot-provider
+          cp -r /tmp/bg/server/* $HOME/bgutil-ytdlp-pot-provider/
+
+      - name: Download video
+        run: |
+          mkdir -p out
+          yt-dlp --js-runtimes node --remote-components ejs:github \
+            --no-warnings --extractor-args "youtube:fetch_pot=always" \
+            -f "bestvideo[height<=1080]" \
+            -o "out/${{ inputs.filename }}.%(ext)s" \
+            "${{ inputs.video_url }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.filename }}
+          path: out/
+          retention-days: 3
