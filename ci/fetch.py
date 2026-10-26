@@ -229,6 +229,13 @@ for idx, job in enumerate(JOBS):
             if "not a bot" not in serr and "Sign in" not in serr and "cookies" not in serr:
                 break
             log(f"    bot校验拦截, 换客户端 {cl} 重试")
+        if not samples and ("bot" in serr.lower() or "Sign in" in serr or "cookies" in serr):
+            log("    换代理取样")
+            for pr in alive_proxies(6)[:5]:
+                samples, serr = qc.grab_samples(vurl, ytdlp_args("android"), work, "s", dur, proxy=pr)
+                if samples:
+                    log(f"    代理可用: {pr}")
+                    break
         frames = []
         for si, sp in enumerate(samples):
             frames += qc.extract_frames(sp, work, f"f{si}", n=8)
@@ -275,6 +282,8 @@ for idx, job in enumerate(JOBS):
     else:
         log(f"{key} ✗ {why[:120]}")
         report.append({"key": key, "ok": False, "why": why[:120], "qc": qc_log})
+
+    time.sleep(30)   # 任务间降温, 降低被判定为爬虫的概率
 
 json.dump(report, open("report.json", "w"), ensure_ascii=False, indent=1)
 log(f"完成 {sum(1 for r in report if r['ok'])}/{len(JOBS)}")
