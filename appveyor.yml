@@ -6,8 +6,8 @@ shallow_clone: true
 
 install:
   - sudo apt-get update -qq
-  - sudo apt-get install -y -qq ffmpeg
-  - python3 -m pip install -U --quiet yt-dlp
+  - sudo apt-get install -y -qq ffmpeg tesseract-ocr
+  - python3 -m pip install -U --quiet yt-dlp pillow
   - node --version
 
 build_script:
@@ -16,5 +16,7 @@ build_script:
 artifacts:
   - path: out\*
     name: media
+  - path: qc\*
+    name: qc
   - path: report.json
     name: report
