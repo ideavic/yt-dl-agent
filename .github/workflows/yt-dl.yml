@@ -17,6 +17,10 @@ on:
         description: "Max duration seconds"
         required: false
         default: "36000"
+      max_height:
+        description: "Max video height"
+        required: false
+        default: "1080"
 
 jobs:
   download:
@@ -38,7 +42,7 @@ jobs:
         run: |
           mkdir -p out
           python3 << 'PYEOF'
-          import subprocess, concurrent.futures, random, re, os, sys, json
+          import subprocess, concurrent.futures, random, re, os, sys, json, time
 
           VIDEO_URL = os.environ["VIDEO_URL"]
           OUT = os.environ["OUT"]
@@ -126,9 +130,13 @@ jobs:
               print(f"对 YouTube 存活: {len(alive)}")
               return alive[:limit]
 
-          def ytdlp_download(url, proxy=None, timeout=1500):
+          MAXH = os.environ.get("MAXH", "1080")
+          T0 = time.time()
+          BUDGET = 2100  # 整个下载阶段 35 分钟预算
+
+          def ytdlp_download(url, proxy=None, timeout=300):
               cmd = YTDLP_BASE + (["--proxy", proxy] if proxy else []) + [
-                    "-f", "bestvideo[height<=1080][ext=mp4]/bestvideo[height<=1080]/best",
+                    "-f", f"bestvideo[height<={MAXH}][ext=mp4]/bestvideo[height<={MAXH}]/best",
                     "-o", OUT, url]
               try:
                   r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -171,13 +179,15 @@ jobs:
           print(f"直连失败: {err}")
           clean_part()
 
-          alive = get_alive_proxies(limit=15)
+          alive = get_alive_proxies(limit=12)
           if not alive:
               sys.exit("无可用代理")
           for i, p in enumerate(alive):
+              if time.time() - T0 > BUDGET - 420:
+                  sys.exit(f"下载时间预算耗尽({BUDGET}s)")
               print(f"--- 代理尝试 {i+1}/{len(alive)}: {p} ---")
               clean_part()
-              ok, err = ytdlp_download(target, proxy=p)
+              ok, err = ytdlp_download(target, proxy=p, timeout=480)
               if ok:
                   print(f"下载成功 via {p}")
                   sys.exit(0)
@@ -189,6 +199,7 @@ jobs:
           OUT: out/${{ inputs.filename }}.%(ext)s
           DMIN: ${{ inputs.dmin }}
           DMAX: ${{ inputs.dmax }}
+          MAXH: ${{ inputs.max_height }}
 
       - name: Verify download
         run: |
