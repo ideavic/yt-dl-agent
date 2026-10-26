@@ -5,8 +5,10 @@ import json
 import os
 import random
 import re
+import socket
 import subprocess
 import sys
+import threading
 import time
 
 import qc
@@ -115,12 +117,26 @@ def pick_all(query, dmin, dmax, proxy=None, limit=6):
 
 
 _POOL = None
+_POOL_LOCK = threading.Lock()
 
 
 def alive_proxies(limit=8):
     global _POOL
     if _POOL is not None:
         return _POOL
+    if not _POOL_LOCK.acquire(blocking=False):
+        # 另一个线程正在探测: 等它出结果
+        with _POOL_LOCK:
+            pass
+        return _POOL or []
+    try:
+        return _discover_proxies(limit)
+    finally:
+        _POOL_LOCK.release()
+
+
+def _discover_proxies(limit=8):
+    global _POOL
     raw = []
     for url in [
         "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
@@ -142,19 +158,66 @@ def alive_proxies(limit=8):
     random.shuffle(proxies)
     log(f"代理池候选 {len(proxies)}")
 
+    def hostport(p):
+        body = p.split("://", 1)[-1].split("@")[-1]
+        h, _, pt = body.partition(":")
+        return h, int(pt) if pt.isdigit() else 0
+
+    def tcp_ok(p):
+        """纯 socket 连通性预筛: 不 fork 子进程, 千级候选几秒完成"""
+        h, pt = hostport(p)
+        if not h or not pt:
+            return None
+        try:
+            s = socket.create_connection((h, pt), timeout=1.2)
+            s.close()
+            return p
+        except Exception:
+            return None
+
+    # 阶段1: TCP 连通快筛(候选截断, 存活即止)
+    pool = proxies[:3000]
+    tcp_alive = []
+    with concurrent.futures.ThreadPoolExecutor(400) as ex:
+        futs = [ex.submit(tcp_ok, p) for p in pool]
+        for f in concurrent.futures.as_completed(futs):
+            try:
+                p = f.result()
+            except Exception:
+                p = None
+            if p:
+                tcp_alive.append(p)
+    log(f"TCP 连通 {len(tcp_alive)}")
+    if not tcp_alive:
+        _POOL = []
+        return _POOL
+
+    random.shuffle(tcp_alive)
+
     def test(p):
-        r = sh(["curl", "-s", "-x", p, "--max-time", "6", "-o", "/dev/null",
-                "-w", "%{http_code}", "https://www.youtube.com/generate_204"], 10)
+        r = sh(["curl", "-s", "-x", p, "--max-time", "5", "-o", "/dev/null",
+                "-w", "%{http_code}", "https://www.youtube.com/generate_204"], 9)
         return p if r and r.stdout.strip().startswith("2") else None
 
+    # 阶段2: 只对 TCP 存活的验证能否出网到 YouTube, 凑够即停
     alive = []
-    pool = proxies[:4000]
-    with concurrent.futures.ThreadPoolExecutor(300) as ex:
-        for x in ex.map(test, pool):
-            if x:
-                alive.append(x)
-            if len(alive) >= limit * 2:
-                break
+    cand = tcp_alive[:600]
+    with concurrent.futures.ThreadPoolExecutor(80) as ex:
+        futs = [ex.submit(test, p) for p in cand]
+        try:
+            for f in concurrent.futures.as_completed(futs, timeout=120):
+                try:
+                    p = f.result()
+                except Exception:
+                    p = None
+                if p:
+                    alive.append(p)
+                    if len(alive) >= limit * 2:
+                        break
+        except concurrent.futures.TimeoutError:
+            log("代理验证超时, 用已有结果")
+        for f in futs:
+            f.cancel()
     random.shuffle(alive)
     log(f"对 YouTube 存活 {len(alive)}")
     _POOL = alive[:limit]
@@ -211,25 +274,36 @@ def fetch_done():
 
 
 report = []
+_REPORT_LOCK = threading.Lock()
+JOB_PAR = int(os.environ.get("JOB_PAR", "2"))     # 并发任务数(每条走不同代理, 2 比较稳)
+
+
+def add_report(item):
+    with _REPORT_LOCK:
+        report.append(item)
+        json.dump(report, open("report.json", "w"), ensure_ascii=False, indent=1)
+
+
 _done = fetch_done()
 _left = [j for j in JOBS if j["key"] not in _done]
-log(f"队列 {len(JOBS)} 条, 已完成 {len(JOBS) - len(_left)} 条, 待做 {len(_left)} 条")
+log(f"队列 {len(JOBS)} 条, 已完成 {len(JOBS) - len(_left)} 条, 待做 {len(_left)} 条, 并发 {JOB_PAR}")
 if not _left:
     log("本批已全部完成(别的构建已收), 直接退出")
     json.dump([], open("report.json", "w"))
     raise SystemExit(0)
 
-for idx, job in enumerate(JOBS):
+
+def run_job(idx, job):
+    """跑一条任务, 结果写进 report; 返回 True 表示有产出"""
     if time.time() - T0 > BUDGET:
-        log("预算耗尽, 停止")
-        break
+        return False
     key = job["key"]
     dest = os.path.join(OUT, job["filename"] + ".mp4")
     if os.path.exists(dest):
-        continue
+        return False
     if key in fetch_done():
         log(f"{key} 已由其他构建完成, 跳过")
-        continue
+        return False
     log(f"===== ({idx+1}/{len(JOBS)}) {key} =====")
     dmin, dmax = int(job.get("dmin", 0)), int(job.get("dmax", 36000))
     maxh = str(job.get("maxh", "720"))
@@ -245,8 +319,8 @@ for idx, job in enumerate(JOBS):
                     break
         if not cands:
             log(f"{key} 搜索无结果")
-            report.append({"key": key, "ok": False, "why": "no-search-result"})
-            continue
+            add_report({"key": key, "ok": False, "why": "no-search-result"})
+            return False
     else:
         cands = [{"id": src.rsplit("=", 1)[-1], "title": "", "duration": 0}]
 
@@ -261,11 +335,16 @@ for idx, job in enumerate(JOBS):
         title = c.get("title") or ""
         dur = c.get("duration") or 0
         log(f"候选{ci+1}/{len(cands)}: {title[:60]} | {dur}s")
+        # 每条任务用不同的代理起点, 避免并发任务抢同一个代理
+        proxy_list = list(alive_proxies(8))
+        if proxy_list:
+            off = (hash(key) + ci) % len(proxy_list)
+            proxy_list = proxy_list[off:] + proxy_list[:off]
         work = os.path.join(TMP, f"{job['filename']}_c{ci}")
         os.makedirs(work, exist_ok=True)
         samples, serr = [], ""
         if PROXY_ONLY:
-            for pr in alive_proxies(8):
+            for pr in proxy_list:
                 samples, serr = qc.grab_samples(vurl, ytdlp_args(None), work, "s", dur, proxy=pr)
                 if samples:
                     log(f"    代理取样成功: {pr}")
@@ -302,13 +381,13 @@ for idx, job in enumerate(JOBS):
         log("  质检通过, 开始正式下载")
         ok, why = False, "skipped"
         if PROXY_ONLY:
-            for pr in alive_proxies(8):
+            for pr in proxy_list:
                 ok, why = download(vurl, dest, maxh, pr, timeout=900)
                 if ok:
                     log(f"    代理下载成功: {pr}")
                     break
                 clean()
-        if not ok:
+        if not ok and not PROXY_ONLY:
             ok, why = download(vurl, dest, maxh)
         if not ok and ("not a bot" in why or "Sign in" in why):
             for cl in CLIENTS[1:]:
@@ -335,13 +414,45 @@ for idx, job in enumerate(JOBS):
     if ok:
         size = os.path.getsize(dest) // 1048576
         log(f"{key} ✓ {size}MB")
-        report.append({"key": key, "ok": True, "file": os.path.basename(dest),
-                       "mb": size, "title": picked_title, "qc": qc_log})
-    else:
-        log(f"{key} ✗ {why[:120]}")
-        report.append({"key": key, "ok": False, "why": why[:120], "qc": qc_log})
+        add_report({"key": key, "ok": True, "file": os.path.basename(dest),
+                    "mb": size, "title": picked_title, "qc": qc_log})
+        return True
+    log(f"{key} ✗ {why[:120]}")
+    add_report({"key": key, "ok": False, "why": why[:120], "qc": qc_log})
+    return False
 
-    time.sleep(30)   # 任务间降温, 降低被判定为爬虫的概率
 
-json.dump(report, open("report.json", "w"), ensure_ascii=False, indent=1)
+def _worker(idx, job):
+    try:
+        return run_job(idx, job)
+    except Exception as e:
+        log(f"{job.get('key')} 任务异常: {e}")
+        add_report({"key": job.get("key"), "ok": False, "why": f"exception: {e}"})
+        return False
+
+
+# 并发跑: 每条任务独立代理 + 独立工作目录, 2 路并发把单构建产出翻倍
+if JOB_PAR <= 1:
+    for idx, job in enumerate(JOBS):
+        if time.time() - T0 > BUDGET:
+            log("预算耗尽, 停止")
+            break
+        _worker(idx, job)
+        time.sleep(20)   # 任务间降温
+else:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=JOB_PAR) as ex:
+        futs = []
+        for idx, job in enumerate(JOBS):
+            if time.time() - T0 > BUDGET:
+                log("预算耗尽, 不再派新任务")
+                break
+            futs.append(ex.submit(_worker, idx, job))
+            time.sleep(8)          # 错开启动, 别同时打搜索接口
+        for f in concurrent.futures.as_completed(futs):
+            try:
+                f.result()
+            except Exception as e:
+                log(f"任务异常: {e}")
+
 log(f"完成 {sum(1 for r in report if r['ok'])}/{len(JOBS)}")
+json.dump(report, open("report.json", "w"), ensure_ascii=False, indent=1)
