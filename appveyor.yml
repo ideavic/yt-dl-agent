@@ -24,6 +24,8 @@ install:
 
 build_script:
   - python3 ci/fetch.py
+  # 主通道: 上传到 GitHub Releases(无下载配额); 没配 GH_TOKEN 时自动跳过走 artifacts 兜底
+  - python3 ci/upload_release.py || echo "release 上传失败, 走 artifacts 兜底"
 
 artifacts:
   - path: out\*
