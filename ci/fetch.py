@@ -87,6 +87,56 @@ def relevant(title, query, need=0.4):
     return hit / len(toks) >= need
 
 
+_THUMB_MODEL = None
+
+
+def _face_detector():
+    """OpenCV 人脸检测器(懒加载, 装不上就跳过预审)"""
+    global _THUMB_MODEL
+    if _THUMB_MODEL is None:
+        try:
+            import cv2
+            _THUMB_MODEL = cv2.CascadeClassifier(
+                cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            if _THUMB_MODEL.empty():
+                _THUMB_MODEL = False
+        except Exception:
+            _THUMB_MODEL = False
+    return _THUMB_MODEL or None
+
+
+def thumb_faces(video_id):
+    """下载候选缩略图做人脸检测: 返回 (最大脸宽度占比, 脸数)
+    口播博主的封面几乎都是大脸特写; 实拍素材封面很少有大脸"""
+    det = _face_detector()
+    if not det or not video_id:
+        return 0.0, 0
+    import tempfile
+    tmp = os.path.join(tempfile.gettempdir(), f"thumb_{video_id}.jpg")
+    r = sh(["curl", "-s", "-L", "--max-time", "8", "-o", tmp,
+            f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"], 12)
+    if not r or not os.path.exists(tmp) or os.path.getsize(tmp) < 2000:
+        return 0.0, 0
+    try:
+        import cv2
+        img = cv2.imread(tmp)
+        if img is None:
+            return 0.0, 0
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = det.detectMultiScale(gray, 1.15, 5, minSize=(40, 40))
+        if len(faces) == 0:
+            return 0.0, 0
+        ratio = max(f[2] for f in faces) / img.shape[1]
+        return ratio, len(faces)
+    except Exception:
+        return 0.0, 0
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def pick_all(query, dmin, dmax, proxy=None, limit=6):
     """返回按评分排序的候选列表 (供逐个质检换源)"""
     cmd = YTDLP + (["--proxy", proxy] if proxy else []) + [
@@ -135,6 +185,19 @@ def pick_all(query, dmin, dmax, proxy=None, limit=6):
             except ValueError:
                 pass
         scored.append((score, dur, e))
+    scored.sort(key=lambda x: -x[0])
+
+    # ===== 首页预审: 先看整个搜索结果首页的缩略图, 挑合适的再下 =====
+    # 大脸特写封面 = 博主口播, 重罚; 实拍封面基本没人脸
+    for i, (sc, dur, e) in enumerate(scored[:8]):
+        try:
+            ratio, n = thumb_faces(e.get("id") or "")
+            if ratio > 0.22:
+                scored[i] = (sc - 4, dur, e)      # 大脸特写: 口播/采访主持人
+            elif n >= 1:
+                scored[i] = (sc - 1, dur, e)      # 有人脸: 略降权(新闻采访可接受)
+        except Exception:
+            pass
     scored.sort(key=lambda x: -x[0])
     return [e for _, _, e in scored[:limit]]
 

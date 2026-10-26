@@ -17,7 +17,7 @@ shallow_clone: true
 install:
   - sudo apt-get update -qq
   - sudo apt-get install -y -qq ffmpeg tesseract-ocr tesseract-ocr-chi-sim
-  - python3 -m pip install -U --quiet yt-dlp bgutil-ytdlp-pot-provider pillow
+  - python3 -m pip install -U --quiet yt-dlp bgutil-ytdlp-pot-provider pillow opencv-python-headless
   - git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
   - (cd /tmp/bg/server && npm ci --ignore-scripts && npx tsc)
   - mkdir -p $HOME/bgutil-ytdlp-pot-provider && cp -a /tmp/bg/server/. $HOME/bgutil-ytdlp-pot-provider/
