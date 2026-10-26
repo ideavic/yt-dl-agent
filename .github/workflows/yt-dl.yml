@@ -25,18 +25,29 @@ on:
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
-      - name: Install yt-dlp + bgutil PO Token provider
+      - name: Install yt-dlp
         run: |
           pip install -U yt-dlp bgutil-ytdlp-pot-provider pysocks
+          yt-dlp --version
+
+      - name: Restore PO token provider
+        id: potcache
+        uses: actions/cache@v4
+        with:
+          path: ~/bgutil-ytdlp-pot-provider
+          key: bgutil-pot-v2
+
+      - name: Build PO token provider (cache miss only)
+        if: steps.potcache.outputs.cache-hit != 'true'
+        run: |
           git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
           cd /tmp/bg/server
           npm ci --ignore-scripts
           npx tsc
           mkdir -p $HOME/bgutil-ytdlp-pot-provider
           cp -r /tmp/bg/server/* $HOME/bgutil-ytdlp-pot-provider/
-          yt-dlp --version
 
       - name: Search + Download
         run: |
@@ -65,7 +76,7 @@ jobs:
               cmd = YTDLP_BASE + (["--proxy", proxy] if proxy else []) + [
                     "--flat-playlist", "--dump-single-json", f"ytsearch10:{query}"]
               try:
-                  r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                  r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
               except subprocess.TimeoutExpired:
                   return None
               if r.returncode != 0 or not (r.stdout or "").strip().startswith("{"):
@@ -117,22 +128,28 @@ jobs:
               print(f"代理总数: {len(proxies)}")
               def test(p):
                   try:
-                      r = subprocess.run(["curl","-s","-x",p,"--max-time","8","-o","/dev/null",
+                      r = subprocess.run(["curl","-s","-x",p,"--max-time","5","-o","/dev/null",
                                           "-w","%{http_code}","https://www.youtube.com/generate_204"],
-                                         capture_output=True, text=True, timeout=12)
+                                         capture_output=True, text=True, timeout=8)
                       return p if r.stdout.strip().startswith("2") else None
                   except Exception: return None
               alive = []
-              with concurrent.futures.ThreadPoolExecutor(200) as ex:
-                  for x in ex.map(test, proxies[:8000]):
-                      if x: alive.append(x)
+              pool = proxies[:6000]
+              CH = 500
+              with concurrent.futures.ThreadPoolExecutor(300) as ex:
+                  for i in range(0, len(pool), CH):
+                      for x in ex.map(test, pool[i:i+CH]):
+                          if x: alive.append(x)
+                      if len(alive) >= limit * 3:
+                          break
               random.shuffle(alive)
               print(f"对 YouTube 存活: {len(alive)}")
               return alive[:limit]
 
           MAXH = os.environ.get("MAXH", "1080")
+          DIRECT = os.environ.get("DIRECT", "0") == "1"
           T0 = time.time()
-          BUDGET = 2100  # 整个下载阶段 35 分钟预算
+          BUDGET = 1500  # 整个下载阶段 25 分钟预算
 
           def ytdlp_download(url, proxy=None, timeout=300):
               cmd = YTDLP_BASE + (["--proxy", proxy] if proxy else []) + [
@@ -151,13 +168,14 @@ jobs:
 
           # ========== 1. 解析搜索 ==========
           target = VIDEO_URL
+          picked = None
           if VIDEO_URL.startswith("ytsearch:"):
               query = VIDEO_URL[9:]
               print(f"搜索模式: {query}")
-              picked = pick_from_search(query)  # 先直连搜
+              if DIRECT:
+                  picked = pick_from_search(query)  # 直连搜
               if not picked:
-                  alive = get_alive_proxies(limit=6)
-                  for p in alive:
+                  for p in get_alive_proxies(limit=4):
                       picked = pick_from_search(query, proxy=p)
                       if picked: break
               if not picked:
@@ -170,24 +188,24 @@ jobs:
                   f.write(f"{title}\n{ch}\nhttps://www.youtube.com/watch?v={vid}\n")
               target = f"https://www.youtube.com/watch?v={vid}"
 
-          # ========== 2. 下载: 先直连, 失败走代理跳板 ==========
-          ok, err = ytdlp_download(target)
-          if ok:
-              print("直连下载成功")
-              sys.exit(0)
+          # ========== 2. 下载: 机房直连必被挡, 直接走住宅代理跳板 ==========
+          if DIRECT:
+              ok, err = ytdlp_download(target)
+              if ok:
+                  print("直连下载成功")
+                  sys.exit(0)
+              print(f"直连失败: {err}")
+              clean_part()
 
-          print(f"直连失败: {err}")
-          clean_part()
-
-          alive = get_alive_proxies(limit=12)
+          alive = get_alive_proxies(limit=8)
           if not alive:
               sys.exit("无可用代理")
           for i, p in enumerate(alive):
-              if time.time() - T0 > BUDGET - 420:
+              if time.time() - T0 > BUDGET - 300:
                   sys.exit(f"下载时间预算耗尽({BUDGET}s)")
               print(f"--- 代理尝试 {i+1}/{len(alive)}: {p} ---")
               clean_part()
-              ok, err = ytdlp_download(target, proxy=p, timeout=480)
+              ok, err = ytdlp_download(target, proxy=p, timeout=300)
               if ok:
                   print(f"下载成功 via {p}")
                   sys.exit(0)
@@ -200,6 +218,7 @@ jobs:
           DMIN: ${{ inputs.dmin }}
           DMAX: ${{ inputs.dmax }}
           MAXH: ${{ inputs.max_height }}
+          DIRECT: "0"
 
       - name: Verify download
         run: |
