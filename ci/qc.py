@@ -47,15 +47,39 @@ def probe_dur(path):
         return 0.0
 
 
+SAMPLES_SEC = 90        # 取样只截中间 90 秒(慢代理下比下整片快 5 倍以上)
+FMT_LOW = "bv*[height<=360]+ba/b[height<=360]/b/worst"
+
+
 def grab_samples(url, ytdlp_base, workdir, key, dur, proxy=None):
-    """下最低画质的整片(体积很小)用于抽帧质检; 返回 (文件列表, 错误信息)"""
+    """取一段最低画质片段用于抽帧质检(体积小, 代理慢也扛得住);
+    截段失败再回退整片。返回 (文件列表, 错误信息)"""
     out = os.path.join(workdir, f"{key}_low.mp4")
-    cmd = list(ytdlp_base) + (["--proxy", proxy] if proxy else []) + [
-        "-f", "bv*[height<=360]+ba/b[height<=360]/b/worst",
-        "--merge-output-format", "mp4",
-        "-o", out, url]
-    r = _sh(cmd, 900)
-    if r and os.path.exists(out) and os.path.getsize(out) > 50000:
+    base = list(ytdlp_base) + (["--proxy", proxy] if proxy else [])
+
+    def _ok(p, min_size=30000):
+        return os.path.exists(p) and os.path.getsize(p) > min_size
+
+    # 第一次: 只截中间一段(--download-sections, 需 ffmpeg)
+    d = dur if dur and dur > 0 else 300
+    start = max(int(d * 0.15), 5)
+    end = min(start + SAMPLES_SEC, max(int(d - 5), start + 10))
+    def _ts(s):
+        s = max(int(s), 0)
+        return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+    seg = os.path.join(workdir, f"{key}_sec.mp4")
+    r = _sh(base + ["-f", FMT_LOW,
+                    "--download-sections", f"*{_ts(start)}-{_ts(end)}",
+                    "--force-keyframes-at-cuts",
+                    "--merge-output-format", "mp4", "-o", seg, url], 240)
+    if _ok(seg):
+        return [seg], ""
+
+    # 回退: 整片最低画质(部分源不支持精确截段)
+    r = _sh(base + ["-f", FMT_LOW, "--merge-output-format", "mp4",
+                    "-o", out, url], 600)
+    if _ok(out, 50000):
         return [out], ""
     err = (r.stderr or "")[-260:] if r else "timeout"
     return [], err.replace("\n", " ")
