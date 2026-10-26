@@ -1,4 +1,5 @@
 name: yt-dl
+run-name: ${{ inputs.filename }}
 on:
   workflow_dispatch:
     inputs:
