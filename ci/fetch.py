@@ -210,13 +210,14 @@ for idx, job in enumerate(JOBS):
         log(f"候选{ci+1}/{len(cands)}: {title[:60]} | {dur}s")
         work = os.path.join(TMP, f"{job['filename']}_c{ci}")
         os.makedirs(work, exist_ok=True)
-        samples = qc.grab_samples(vurl, YTDLP, work, "s", dur)
+        samples, serr = qc.grab_samples(vurl, YTDLP, work, "s", dur)
         frames = []
         for si, sp in enumerate(samples):
             frames += qc.extract_frames(sp, work, f"f{si}", n=8)
         if len(frames) < 3:
-            log("  取样失败, 换源")
-            qc_log.append({"cand": title, "pass": False, "why": "sample-failed"})
+            log(f"  取样失败(samples={len(samples)} frames={len(frames)} err={serr[:100]}), 换源")
+            qc_log.append({"cand": title, "pass": False,
+                           "why": f"sample-failed s={len(samples)} f={len(frames)} {serr[:120]}"})
             continue
         passed, reasons, metrics = qc.check_frames(frames)
         qc_log.append({"cand": title, "pass": passed,
