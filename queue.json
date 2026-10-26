@@ -1,6 +1,22 @@
 {
  "jobs": [
   {
+   "key": "05_P5-1",
+   "filename": "t05_P5_1",
+   "url": "ytsearch:artificial intelligence retail",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "36_P4-1",
+   "filename": "t36_P4_1",
+   "url": "ytsearch:website analytics dashboard screen",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
    "key": "03_P3-1",
    "filename": "t03_P3_1",
    "url": "ytsearch:AI chatbot customer service demo",
@@ -61,22 +77,6 @@
    "filename": "t06_P5_1",
    "url": "ytsearch:futuristic AI technology concept",
    "dmin": 60,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "07_P1-1",
-   "filename": "t07_P1_1",
-   "url": "ytsearch:restaurant bar closing shutting down",
-   "dmin": 60,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "07_P2-1",
-   "filename": "t07_P2_1",
-   "url": "ytsearch:empty bar night lights closed restaurant",
-   "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   }
