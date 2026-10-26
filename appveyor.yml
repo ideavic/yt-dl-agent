@@ -4,22 +4,13 @@ build: off
 clone_depth: 1
 shallow_clone: true
 
-cache:
-  - '$HOME/bgutil-ytdlp-pot-provider' -> bgutil-v2
-
 install:
   - sudo apt-get update -qq
   - sudo apt-get install -y -qq ffmpeg tesseract-ocr
   - python3 -m pip install -U --quiet yt-dlp bgutil-ytdlp-pot-provider pillow
-  - node --version
-  - |
-    if [ ! -d "$HOME/bgutil-ytdlp-pot-provider/build" ]; then
-      git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
-      cd /tmp/bg/server && npm ci --ignore-scripts && npx tsc
-      mkdir -p "$HOME/bgutil-ytdlp-pot-provider"
-      cp -r /tmp/bg/server/* "$HOME/bgutil-ytdlp-pot-provider/"
-    fi
-  - ls "$HOME/bgutil-ytdlp-pot-provider" | head -5
+  - git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
+  - (cd /tmp/bg/server && npm ci --ignore-scripts && npx tsc)
+  - mkdir -p $HOME/bgutil-ytdlp-pot-provider && cp -r /tmp/bg/server/script /tmp/bg/server/build /tmp/bg/server/package.json $HOME/bgutil-ytdlp-pot-provider/
 
 build_script:
   - python3 ci/fetch.py
