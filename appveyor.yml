@@ -1,0 +1,20 @@
+version: '{build}'
+image: Ubuntu2204
+build: off
+clone_depth: 1
+shallow_clone: true
+
+install:
+  - sudo apt-get update -qq
+  - sudo apt-get install -y -qq ffmpeg
+  - python3 -m pip install -U --quiet yt-dlp
+  - node --version
+
+build_script:
+  - python3 ci/fetch.py
+
+artifacts:
+  - path: out\*
+    name: media
+  - path: report.json
+    name: report
