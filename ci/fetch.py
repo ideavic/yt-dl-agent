@@ -253,6 +253,7 @@ for idx, job in enumerate(JOBS):
             qc_log.append({"cand": title, "pass": False,
                            "why": f"sample-failed s={len(samples)} f={len(frames)} {serr[:120]}"})
             continue
+        qc.build_strip(frames, os.path.join("qc", f"{job['filename']}_c{ci}.jpg"))
         passed, reasons, metrics = qc.check_frames(frames)
         qc_log.append({"cand": title, "pass": passed,
                        "why": "; ".join(reasons) or "ok", "metrics": metrics})
