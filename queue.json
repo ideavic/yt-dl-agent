@@ -25,14 +25,6 @@
    "maxh": "720"
   },
   {
-   "key": "03_P4-1",
-   "filename": "t03_P4_1",
-   "url": "ytsearch:local shop owner smartphone",
-   "dmin": 45,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
    "key": "05_P1-1",
    "filename": "t05_P1_1",
    "url": "ytsearch:AI runs store experiment unmanned",
@@ -77,6 +69,14 @@
    "filename": "t06_P1_1",
    "url": "ytsearch:AI CEO company experiment",
    "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "06_P2-1",
+   "filename": "t06_P2_1",
+   "url": "ytsearch:corporate boardroom meeting business",
+   "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   }
