@@ -28,6 +28,9 @@ _BASE = ["yt-dlp", "--no-warnings", "--socket-timeout", "20",
          "--sleep-requests", "1"]
 
 CLIENTS = [None, "android", "ios", "tv", "web_safari"]
+PROXY_ONLY = os.environ.get("PROXY_ONLY", "0") == "1"
+if PROXY_ONLY:
+    CLIENTS = []
 
 
 def ytdlp_args(client=None):
@@ -222,6 +225,12 @@ for idx, job in enumerate(JOBS):
         work = os.path.join(TMP, f"{job['filename']}_c{ci}")
         os.makedirs(work, exist_ok=True)
         samples, serr = [], ""
+        if PROXY_ONLY:
+            for pr in alive_proxies(8):
+                samples, serr = qc.grab_samples(vurl, ytdlp_args(None), work, "s", dur, proxy=pr)
+                if samples:
+                    log(f"    代理取样成功: {pr}")
+                    break
         for cl in CLIENTS:
             samples, serr = qc.grab_samples(vurl, ytdlp_args(cl), work, "s", dur)
             if samples:
@@ -251,7 +260,16 @@ for idx, job in enumerate(JOBS):
             log(f"  质检不过: {'; '.join(reasons)[:90]} → 换源")
             continue
         log("  质检通过, 开始正式下载")
-        ok, why = download(vurl, dest, maxh)
+        ok, why = False, "skipped"
+        if PROXY_ONLY:
+            for pr in alive_proxies(8):
+                ok, why = download(vurl, dest, maxh, pr, timeout=900)
+                if ok:
+                    log(f"    代理下载成功: {pr}")
+                    break
+                clean()
+        if not ok:
+            ok, why = download(vurl, dest, maxh)
         if not ok and ("not a bot" in why or "Sign in" in why):
             for cl in CLIENTS[1:]:
                 clean()
