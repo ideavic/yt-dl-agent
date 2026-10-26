@@ -1,36 +1,26 @@
 #!/usr/bin/env python3
-"""画面质检 v2 (用户确认规则):
-  - 四角叠加台标/logo (静止持续出现) -> 拒, 换源
-  - 底部一排字 / 字幕条 / 新闻包装 (lower third) -> 允许, 只记录不判废
-台标判定: 角落高边缘密度 + 帧间形状固定(IoU) + 叠加物为"小块"(非扁横条/非满角大块)
+"""画面质检 v3 (用户确认规则):
+  - 底部一排字 / 字幕条 / 字幕包装(lower third) -> 拒, 换源
+  - 四角台标 / logo -> 允许, 不判废
+
+字幕判定(不依赖 OCR, 中英文通用): 底部带里存在"亮色断续文字块",
+且该文字行在多帧中位置固定(字幕总在同一高度), 横向覆盖足够宽。
+四角 logo 是连续单个亮块(段数 1) 且只占窄条, 天然不会被判成字幕。
 """
 import os
 import subprocess
 
-from PIL import Image, ImageFilter
+from PIL import Image
 
-SAMPLES = [(0.20, 8), (0.65, 8)]   # 取两个位置各 8 秒
-
-TH_EDGE = 0.15        # 角区域边缘密度阈值
-TH_IOU = 0.45         # 命中帧两两边缘形状重合度, 高于此视为同一叠加物
-TH_RUN = 0.35         # 底部带连续边缘列段 ≥35% 宽且跨过角区边界 => 横贯字幕/包装(放行)
-HIT_MIN_RATIO = 0.6   # 至少 60% 帧命中才算台标
-SIG = (64, 32)        # 帧间比较用缩略边缘掩码(保留文字细节, 字幕间 IoU 更低)
-BAND_COLS = 100       # 底部带列二值化精度
-CORNERS = ("tl", "tr", "bl", "br")
-
-
-def _run_across(cols, anchor):
-    """包含 anchor 列的连续 True 段长度"""
-    if anchor >= len(cols) or not cols[anchor]:
-        return 0
-    lo = anchor
-    while lo > 0 and cols[lo - 1]:
-        lo -= 1
-    hi = anchor
-    while hi < len(cols) - 1 and cols[hi + 1]:
-        hi += 1
-    return hi - lo + 1
+BAND_TOP = 0.72         # 字幕带: 画面高度 72% ~ 100%
+LIT = 195               # 亮色像素阈值(白字)
+COLS = 120              # 列投影精度
+ROW_BOTTOM_MIN = 0.10   # 文字行必须在字幕带的下部(即画面 >=75% 高, 兼顾偏上的字幕)
+MIN_LIT_COLS = 0.25     # 亮列占画面宽 >=25%(字幕横贯; 角落 logo 只有 ~13%)
+MIN_RUNS = 4            # 亮块段数 >=4 => 断续文字(有词间距); logo 是 1 段连续块
+ROW_STD_MAX = 4.0       # 文字行位置标准差(px)上限 => 行固定
+HIT_MIN_RATIO = 0.6     # 至少 60% 帧命中才判字幕
+DARK_MEAN = 12          # 黑帧均值上限
 
 
 def _sh(cmd, timeout=180):
@@ -78,120 +68,86 @@ def extract_frames(video, outdir, prefix, n=4, width=360):
 
 
 def ocr_words(path):
+    """OCR 词数, 仅作辅助证据写入 report(不参与判定)"""
     try:
-        r = _sh(["tesseract", path, "-", "--psm", "6", "-l", "eng"], 60)
+        r = _sh(["tesseract", path, "-", "--psm", "6", "-l", "eng+chi_sim"], 60)
     except FileNotFoundError:
         return 0
     if not r:
         return 0
-    words = [w for w in (r.stdout or "").split()
-             if sum(c.isalpha() for c in w) >= 3 and len(w) >= 3]
-    return len(words)
+    txt = r.stdout or ""
+    words = [w for w in txt.split() if len(w) >= 2]
+    cjk = sum(1 for c in txt if "\u4e00" <= c <= "\u9fff")
+    return len(words) + cjk // 2
 
 
-def _mask_of(path, box):
-    """角区域边缘掩码(SIG 尺寸) + 边缘密度"""
-    im = Image.open(path).convert("L")
-    e = im.crop(box).filter(ImageFilter.FIND_EDGES)
-    m = [1 if p > 55 else 0 for p in e.resize(SIG).getdata()]
-    return m, sum(m) / len(m)
-
-
-def _band_runs(path):
-    """底部带(85%~100%高)列二值化后, 跨下两角锚点的连续 run 占全宽比例"""
+def band_profile(path):
+    """底部字幕带的亮像素剖面 -> (行投影, 列投影, 亮像素占比)"""
     im = Image.open(path).convert("L")
     w, h = im.size
-    band = im.crop((0, int(h * .85), w, h)).filter(ImageFilter.FIND_EDGES)
+    band = im.crop((0, int(h * BAND_TOP), w, h))
     bw, bh = band.size
-    px = band.load()
-    raw = []
-    for x in range(bw):
-        mx = 0
-        for y in range(bh):
-            v = px[x, y]
-            if v > mx:
-                mx = v
-        raw.append(mx > 55)
-    seg = bw / BAND_COLS
-    cols = [any(raw[int(i * seg):max(int((i + 1) * seg), int(i * seg) + 1)])
-            for i in range(BAND_COLS)]
-    bl_anchor = int(0.17 * BAND_COLS)
-    br_anchor = int(0.83 * BAND_COLS)
-    return (_run_across(cols, bl_anchor) / BAND_COLS,
-            _run_across(cols, br_anchor) / BAND_COLS)
+    b = band.point(lambda p: 255 if p > LIT else 0)
+    lit = sum(b.getdata())
+    ratio = (lit / 255) / max(bw * bh, 1)
+    rows = list(b.resize((1, bh), Image.BOX).getdata())
+    cols = list(b.resize((COLS, 1), Image.BOX).getdata())
+    return rows, cols, ratio
 
 
-def corner_states(frames):
-    """每帧四角: (掩码, 边缘密度) + 底部带跨锚点连续 run"""
-    im_boxes = None
-    out = []
-    for f in frames:
-        im = Image.open(f).convert("L")
-        w, h = im.size
-        if im_boxes is None:
-            im_boxes = {
-                "tl": (0, 0, int(w * .16), int(h * .15)),
-                "tr": (int(w * .84), 0, w, int(h * .15)),
-                "bl": (0, int(h * .85), int(w * .16), h),
-                "br": (int(w * .84), int(h * .85), w, h),
-            }
-        run_bl, run_br = _band_runs(f)
-        st = {}
-        for k, b in im_boxes.items():
-            m, d = _mask_of(f, b)
-            st[k] = {"mask": m, "edge": d}
-        st["run_bl"], st["run_br"] = run_bl, run_br
-        out.append(st)
-    return out
-
-
-def bottom_text(path):
-    """底部文字量, 仅作记录(允许字幕/包装), 不参与判废"""
-    im = Image.open(path)
-    w, h = im.size
-    sub = im.crop((0, int(h * 0.70), w, h))
-    tmp = path + ".bottom.jpg"
-    sub.save(tmp, quality=85)
-    n = ocr_words(tmp)
-    os.remove(tmp)
-    return n
+def looks_like_subtitle(path):
+    """单帧: 底部是否有"连续行位置的断续文字块"。返回 (bool, peak_row, runs, lit_cols)"""
+    rows, cols, ratio = band_profile(path)
+    bh = len(rows)
+    if bh == 0:
+        return False, 0, 0, 0.0
+    peak = max(range(bh), key=lambda j: rows[j])
+    if peak < bh * ROW_BOTTOM_MIN:
+        return False, peak, 0, 0.0
+    th = max(cols) * 0.35
+    lit_cols = [c > th for c in cols]
+    cover = sum(lit_cols) / len(lit_cols)
+    runs, prev = 0, False
+    for c in lit_cols:
+        if c and not prev:
+            runs += 1
+        prev = c
+    ok = (cover >= MIN_LIT_COLS) and (runs >= MIN_RUNS)
+    return ok, peak, runs, cover
 
 
 def check_frames(frames):
-    """四角台标判定; 底部字幕/包装放行。返回 (ok, reasons, metrics)"""
+    """字幕条判定。返回 (ok, reasons, metrics)"""
     n = len(frames)
-    if n == 0:
-        return False, ["no-frames"], []
-    states = corner_states(frames)
-    metrics, reasons = [], []
+    if n < 3:
+        return False, [f"帧数不足({n})"], []
+    metrics, cand = [], []
     for i, f in enumerate(frames):
-        bt = bottom_text(f)
-        metrics.append({"f": i,
-                        "corners": {k: round(v["edge"], 3) for k, v in states[i].items()
-                                    if isinstance(v, dict)},
-                        "bottom_words": bt})
+        im = Image.open(f).convert("L")
+        mean = sum(im.resize((1, 1), Image.BOX).getdata()) / 255 * 255
+        ok, peak, runs, cover = looks_like_subtitle(f)
+        metrics.append({"f": i, "dark_mean": int(mean),
+                        "ocr_words": ocr_words(f)})
+        if ok:
+            cand.append((i, peak, runs, cover))
+
+    reasons = []
+    # 全黑/空画面
+    dark = sum(1 for m in metrics if m["dark_mean"] <= DARK_MEAN)
+    if dark >= max(2, int(round(n * HIT_MIN_RATIO))):
+        reasons.append(f"画面全黑/无内容 {dark}/{n}帧")
+        return False, reasons, metrics
+
     need = max(2, int(round(n * HIT_MIN_RATIO)))
-    # 横贯字幕/包装豁免: 连续边缘跨过角区边界且 ≥35% 宽的帧占多数 => 放行下两角
-    exempt = {k: sum(1 for s in states if s[f"run_{k}"] >= TH_RUN) >= max(2, int(round(n * 0.6)))
-              for k in ("bl", "br")}
-    for k in CORNERS:
-        if exempt.get(k):
-            continue
-        edges = [s[k]["edge"] for s in states]
-        hits = [i for i, e in enumerate(edges) if e > TH_EDGE]
-        if len(hits) < need:
-            continue
-        masks = [states[i][k]["mask"] for i in hits]
-        ious = []
-        for a in range(len(masks)):
-            for b in range(a + 1, len(masks)):
-                inter = sum(1 for x, y in zip(masks[a], masks[b]) if x and y)
-                union = sum(1 for x, y in zip(masks[a], masks[b]) if x or y)
-                if union:
-                    ious.append(inter / union)
-        iou = sum(ious) / len(ious) if ious else 0.0
-        if iou > TH_IOU:
-            reasons.append(f"四角台标[{k}] {len(hits)}/{n}帧 叠加物形状固定(iou={iou:.2f})")
+    if len(cand) >= need:
+        peaks = [c[1] for c in cand]
+        mean = sum(peaks) / len(peaks)
+        std = (sum((p - mean) ** 2 for p in peaks) / len(peaks)) ** 0.5
+        if std <= ROW_STD_MAX:
+            cover = sum(c[3] for c in cand) / len(cand)
+            runs = sum(c[2] for c in cand) / len(cand)
+            reasons.append(f"底部字幕条 {len(cand)}/{n}帧 行固定(y±{std:.1f}) "
+                           f"文字块{runs:.0f}段 覆盖{cover:.0%}宽")
     return (len(reasons) == 0), reasons, metrics
 
 
