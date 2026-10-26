@@ -25,16 +25,17 @@ def probe_dur(path):
 
 
 def grab_samples(url, ytdlp_base, workdir, key, dur):
-    """下最低画质的整片(体积很小)用于抽帧质检"""
+    """下最低画质的整片(体积很小)用于抽帧质检; 返回 (文件列表, 错误信息)"""
     out = os.path.join(workdir, f"{key}_low.mp4")
     cmd = list(ytdlp_base) + [
-        "-f", "worst[height<=360]/worst",
-        "--max-filesize", "120M",
+        "-f", "bv*[height<=360]+ba/b[height<=360]/b/worst",
+        "--merge-output-format", "mp4",
         "-o", out, url]
     r = _sh(cmd, 900)
     if r and os.path.exists(out) and os.path.getsize(out) > 50000:
-        return [out]
-    return []
+        return [out], ""
+    err = (r.stderr or "")[-260:] if r else "timeout"
+    return [], err.replace("\n", " ")
 
 
 def extract_frames(video, outdir, prefix, n=4, width=360):
