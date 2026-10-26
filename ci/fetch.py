@@ -22,11 +22,20 @@ JOBS = QUEUE.get("jobs", [])
 BUDGET = int(os.environ.get("BUDGET", "2700"))
 T0 = time.time()
 
-YTDLP = ["yt-dlp", "--no-warnings", "--socket-timeout", "20",
+_BASE = ["yt-dlp", "--no-warnings", "--socket-timeout", "20",
          "--no-part", "--http-chunk-size", "5M", "--retries", "2",
          "--js-runtimes", "node", "--remote-components", "ejs:github",
-         "--extractor-args", "youtube:fetch_pot=always",
          "--sleep-requests", "1"]
+
+CLIENTS = [None, "android", "ios", "tv", "web_safari"]
+
+
+def ytdlp_args(client=None):
+    extra = "youtube:fetch_pot=always" + (f";player_client={client}" if client else "")
+    return _BASE + ["--extractor-args", extra]
+
+
+YTDLP = ytdlp_args(None)
 
 CHANNEL_BONUS = ["reuters", "associated press", "ap archive", "bloomberg", "cnbc", "bbc",
                  "dw news", "deutsche welle", "cna", "channel newsasia", "afp",
@@ -149,8 +158,8 @@ def alive_proxies(limit=8):
     return _POOL
 
 
-def download(url, dest, maxh, proxy=None, timeout=600):
-    cmd = YTDLP + (["--proxy", proxy] if proxy else []) + [
+def download(url, dest, maxh, proxy=None, timeout=600, client=None):
+    cmd = ytdlp_args(client) + (["--proxy", proxy] if proxy else []) + [
         "-f", f"bv*[height<={maxh}]+ba/b[height<={maxh}]/b",
         "--merge-output-format", "mp4", "-o", dest, url]
     r = sh(cmd, timeout)
@@ -212,7 +221,14 @@ for idx, job in enumerate(JOBS):
         log(f"候选{ci+1}/{len(cands)}: {title[:60]} | {dur}s")
         work = os.path.join(TMP, f"{job['filename']}_c{ci}")
         os.makedirs(work, exist_ok=True)
-        samples, serr = qc.grab_samples(vurl, YTDLP, work, "s", dur)
+        samples, serr = [], ""
+        for cl in CLIENTS:
+            samples, serr = qc.grab_samples(vurl, ytdlp_args(cl), work, "s", dur)
+            if samples:
+                break
+            if "not a bot" not in serr and "Sign in" not in serr and "cookies" not in serr:
+                break
+            log(f"    bot校验拦截, 换客户端 {cl} 重试")
         frames = []
         for si, sp in enumerate(samples):
             frames += qc.extract_frames(sp, work, f"f{si}", n=8)
@@ -229,6 +245,12 @@ for idx, job in enumerate(JOBS):
             continue
         log("  质检通过, 开始正式下载")
         ok, why = download(vurl, dest, maxh)
+        if not ok and ("not a bot" in why or "Sign in" in why):
+            for cl in CLIENTS[1:]:
+                clean()
+                ok, why = download(vurl, dest, maxh, client=cl)
+                if ok:
+                    break
         if not ok:
             log(f"  直连失败({why[:60]}), 走代理")
             clean()
