@@ -1,82 +1,82 @@
 {
  "jobs": [
   {
-   "key": "05_P5-1",
-   "filename": "t05_P5_1",
-   "url": "ytsearch:artificial intelligence retail",
+   "key": "03_P1-1",
+   "filename": "t03_P1_1",
+   "url": "ytsearch:small business owner using tablet in shop",
    "dmin": 60,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "36_P4-1",
-   "filename": "t36_P4_1",
-   "url": "ytsearch:website analytics dashboard screen",
+   "key": "03_P2-1",
+   "filename": "t03_P2_1",
+   "url": "ytsearch:small shop owner serving customers counter",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "03_P3-1",
-   "filename": "t03_P3_1",
-   "url": "ytsearch:AI chatbot customer service demo",
+   "key": "03_P4-1",
+   "filename": "t03_P4_1",
+   "url": "ytsearch:shop owner checking phone in store",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "05_P4-1",
+   "filename": "t05_P4_1",
+   "url": "ytsearch:self checkout scanner supermarket closeup",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "06_P2-1",
+   "filename": "t06_P2_1",
+   "url": "ytsearch:boardroom meeting executives conference table",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "07_P1-1",
+   "filename": "t07_P1_1",
+   "url": "ytsearch:restaurant bar closing shutting down",
    "dmin": 60,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "05_P1-1",
-   "filename": "t05_P1_1",
-   "url": "ytsearch:AI agent runs business",
-   "dmin": 60,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "05_P2-1",
-   "filename": "t05_P2_1",
-   "url": "ytsearch:unmanned convenience store robot cafe",
+   "key": "07_P2-1",
+   "filename": "t07_P2_1",
+   "url": "ytsearch:empty bar night lights closed restaurant",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "05_P3-1",
-   "filename": "t05_P3_1",
-   "url": "ytsearch:robot server restaurant",
+   "key": "07_P3-1",
+   "filename": "t07_P3_1",
+   "url": "ytsearch:bar interior neon night",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "06_P1-1",
-   "filename": "t06_P1_1",
-   "url": "ytsearch:AI CEO company experiment",
-   "dmin": 60,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "06_P3-1",
-   "filename": "t06_P3_1",
-   "url": "ytsearch:artificial intelligence robot office",
+   "key": "07_P4-1",
+   "filename": "t07_P4_1",
+   "url": "ytsearch:pub drinks table friends",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "06_P4-1",
-   "filename": "t06_P4_1",
-   "url": "ytsearch:business profit growth chart",
+   "key": "07_P5-1",
+   "filename": "t07_P5_1",
+   "url": "ytsearch:city street nightlife closed",
    "dmin": 45,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "06_P5-1",
-   "filename": "t06_P5_1",
-   "url": "ytsearch:futuristic AI technology concept",
-   "dmin": 60,
    "dmax": 1800,
    "maxh": "720"
   }
