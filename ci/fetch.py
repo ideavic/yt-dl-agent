@@ -273,6 +273,19 @@ def fetch_done():
     return set()
 
 
+PROBE_VIDEO = "https://www.youtube.com/watch?v=jNQXAC9IVRw"   # 19 秒老视频, 解析最便宜
+
+
+def direct_available():
+    """20 秒内试解析一次: 通了说明机房 IP 没被拦, 直连比代理快 20 倍"""
+    try:
+        r = sh(ytdlp_args(None) + ["--socket-timeout", "12", "--skip-download",
+                                   "--print", "%(id)s", PROBE_VIDEO], 45)
+    except Exception:
+        return False
+    return bool(r) and r.returncode == 0 and "jNQXAC9IVRw" in (r.stdout or "")
+
+
 report = []
 _REPORT_LOCK = threading.Lock()
 JOB_PAR = int(os.environ.get("JOB_PAR", "2"))     # 并发任务数(每条走不同代理, 2 比较稳)
@@ -286,6 +299,17 @@ def add_report(item):
 
 _done = fetch_done()
 _left = [j for j in JOBS if j["key"] not in _done]
+
+# 开工先探一次直连: 机房 IP 没被拦就用直连(比代理池快约 20 倍)
+if PROXY_ONLY and os.environ.get("PROBE_DIRECT", "1") == "1":
+    log("直连探测中…")
+    if direct_available():
+        PROXY_ONLY = False
+        CLIENTS = [None, "android", "ios", "tv", "web_safari"]
+        log("直连可用 → 本构建走直连")
+    else:
+        log("直连被拦 → 走代理池")
+
 log(f"队列 {len(JOBS)} 条, 已完成 {len(JOBS) - len(_left)} 条, 待做 {len(_left)} 条, 并发 {JOB_PAR}")
 if not _left:
     log("本批已全部完成(别的构建已收), 直接退出")

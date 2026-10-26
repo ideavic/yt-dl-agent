@@ -72,13 +72,13 @@ def grab_samples(url, ytdlp_base, workdir, key, dur, proxy=None):
     r = _sh(base + ["-f", FMT_LOW,
                     "--download-sections", f"*{_ts(start)}-{_ts(end)}",
                     "--force-keyframes-at-cuts",
-                    "--merge-output-format", "mp4", "-o", seg, url], 240)
+                    "--merge-output-format", "mp4", "-o", seg, url], 180)
     if _ok(seg):
         return [seg], ""
 
     # 回退: 整片最低画质(部分源不支持精确截段)
     r = _sh(base + ["-f", FMT_LOW, "--merge-output-format", "mp4",
-                    "-o", out, url], 600)
+                    "-o", out, url], 420)
     if _ok(out, 50000):
         return [out], ""
     err = (r.stderr or "")[-260:] if r else "timeout"
