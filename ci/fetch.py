@@ -111,6 +111,15 @@ def pick_all(query, dmin, dmax, proxy=None, limit=6):
             score += 2
         if (e.get("view_count") or 0) > 10000:
             score += 1
+        # 竖屏优先(用户偏好, 软性加分不硬筛)
+        res = e.get("resolution") or ""
+        if "x" in res:
+            try:
+                w, h = res.split("x")[:2]
+                if int(h) > int(w):
+                    score += 2
+            except ValueError:
+                pass
         scored.append((score, dur, e))
     scored.sort(key=lambda x: -x[0])
     return [e for _, _, e in scored[:limit]]

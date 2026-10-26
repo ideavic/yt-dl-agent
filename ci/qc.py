@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""画面质检 v3 (用户确认规则):
+"""画面质检 v3.2 (用户确认规则):
   - 底部一排字 / 字幕条 / 字幕包装(lower third) -> 拒, 换源
   - 四角台标 / logo -> 允许, 不判废
+  - PPT 幻灯片 -> 拒, 换源
+  - 产品界面演示(新闻/产品相关) -> 允许(不能把产品 UI 误杀)
 
 字幕判定(不依赖 OCR, 中英文通用): 底部带里存在"亮色断续文字块",
 且该文字行在多帧中位置固定(字幕总在同一高度), 横向覆盖足够宽。
 四角 logo 是连续单个亮块(段数 1) 且只占窄条, 天然不会被判成字幕。
+
+PPT vs 产品界面的区分: 两者都有长直线+大面积单色底, 但
+  PPT = 大面积白底 + 几乎无彩色(高亮低饱和) -> 拒
+  产品界面 = 深色底或彩色元素丰富(深/彩) -> 放行
 """
 import os
 import subprocess
@@ -22,13 +28,17 @@ ROW_STD_MAX = 4.0       # 文字行位置标准差(px)上限 => 行固定
 HIT_MIN_RATIO = 0.6     # 至少 60% 帧命中才判字幕
 DARK_MEAN = 12          # 黑帧均值上限
 
-# 界面/PPT 判定: 大量长横竖线 + 大面积单色底(实景照片/街景不具备)
+# 界面判定: 大量长横竖线 + 大面积单色底(实景照片/街景不具备)
 SCREEN_W = 240          # 分析用宽度
 EDGE_G = 28             # 梯度阈值
 MIN_LINE_LEN = 0.20     # 长直线: 横线 ≥20% 宽, 竖线 ≥20% 高
 SCREEN_LINES = 3        # 长直线条数下限(辅助, 排除纯自然单色如蓝天)
 SCREEN_FLAT = 0.32      # 主灰度占比下限(大面积纯色底; 实景实测 0.04~0.17)
-SCREEN_RATIO = 0.5      # 半数以上帧像界面/PPT => 判废
+SCREEN_RATIO = 0.5      # 半数以上帧像 PPT => 判废(产品界面不算)
+
+# PPT 特征: 大面积白底 + 无彩色。产品界面多为深色底或彩色元素丰富, 据此放行
+PPT_BRIGHT = 140        # 平均亮度下限(PPT 白底实测 >180, 产品界面深色底 <120)
+PPT_SAT = 0.12          # 高饱和像素占比上限(PPT 彩色极少; 软件界面常有大量彩色)
 
 
 def _sh(cmd, timeout=180):
@@ -149,8 +159,9 @@ def looks_like_subtitle(path):
 
 
 def screen_score(path):
-    """界面/PPT 特征: (长横线条数, 长竖线条数, 主灰度占比)
-    PPT/录屏 = 大量横竖矩形线框 + 大面积单色底; 实景照片两者都很低"""
+    """界面特征: (长横线条数, 长竖线条数, 主灰度占比, 平均亮度, 彩色像素占比)
+    PPT/录屏 = 大量横竖矩形线框 + 大面积单色底; 实景照片两者都很低
+    亮度+彩色占比用于区分 PPT(白底无彩) 与 产品界面(深色/彩色)"""
     im = Image.open(path).convert("L")
     w0, h0 = im.size
     im = im.resize((SCREEN_W, max(int(SCREEN_W * h0 / w0), 8)))
@@ -181,12 +192,23 @@ def screen_score(path):
                 run = 0
     hist = im.histogram()
     flat = max(hist) / max(w * h, 1)
-    return hl, vl, flat
+    mean = sum(i * c for i, c in enumerate(hist)) / max(w * h, 1)
+
+    rgb = Image.open(path).convert("RGB").resize((160, 90))
+    npx = 160 * 90
+    r = rgb.getdata()
+    sat = sum(1 for p in r if max(p) - min(p) > 60) / npx
+    return hl, vl, flat, mean, sat
 
 
 def looks_like_screen(path):
-    hl, vl, flat = screen_score(path)
-    return (hl + vl >= SCREEN_LINES) and (flat >= SCREEN_FLAT), hl, vl, flat
+    """返回 (screen_like, ppt_like, hl, vl, flat, mean, sat)
+    screen_like: 像"某类界面"(PPT 或产品界面都算)
+    ppt_like:    是 PPT 幻灯片(白底无彩) -> 该拒; 产品界面(深/彩) -> 放行"""
+    hl, vl, flat, mean, sat = screen_score(path)
+    screen_like = (hl + vl >= SCREEN_LINES) and (flat >= SCREEN_FLAT)
+    ppt_like = screen_like and (mean >= PPT_BRIGHT) and (sat <= PPT_SAT)
+    return screen_like, ppt_like, hl, vl, flat, mean, sat
 
 
 def check_frames(frames):
@@ -199,9 +221,11 @@ def check_frames(frames):
         im = Image.open(f).convert("L")
         mean = sum(im.resize((1, 1), Image.BOX).getdata()) / 255 * 255
         ok, peak, runs, cover = looks_like_subtitle(f)
-        scr, hl, vl, flat = looks_like_screen(f)
-        metrics.append({"f": i, "dark_mean": int(mean), "screen": scr,
+        scr, ppt, hl, vl, flat, fmean, sat = looks_like_screen(f)
+        metrics.append({"f": i, "dark_mean": int(mean), "screen": ppt,
+                        "ui": bool(scr and not ppt),
                         "lines": hl + vl, "flat": round(flat, 2),
+                        "bright": int(fmean), "sat": round(sat, 2),
                         "ocr_words": ocr_words(f)})
         if ok:
             cand.append((i, peak, runs, cover))
@@ -213,12 +237,14 @@ def check_frames(frames):
         reasons.append(f"画面全黑/无内容 {dark}/{n}帧")
         return False, reasons, metrics
 
-    # 界面演示 / PPT 画面(用户明确不要)
+    # PPT 幻灯片画面(用户明确不要; 产品界面演示不算, 放行)
     scr = sum(1 for m in metrics if m["screen"])
     if scr >= max(2, int(round(n * SCREEN_RATIO))):
         lines = sum(m["lines"] for m in metrics) // n
         flat = sum(m["flat"] for m in metrics) / n
-        reasons.append(f"界面演示/PPT画面 {scr}/{n}帧(直线{lines}条 单色底{flat:.0%})")
+        bright = sum(m["bright"] for m in metrics) / n
+        reasons.append(f"PPT幻灯片画面 {scr}/{n}帧(直线{lines}条 单色底{flat:.0%} "
+                       f"亮度{bright:.0f}低彩)")
         return False, reasons, metrics
 
     need = max(2, int(round(n * HIT_MIN_RATIO)))
