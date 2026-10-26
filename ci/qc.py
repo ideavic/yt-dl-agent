@@ -22,6 +22,14 @@ ROW_STD_MAX = 4.0       # 文字行位置标准差(px)上限 => 行固定
 HIT_MIN_RATIO = 0.6     # 至少 60% 帧命中才判字幕
 DARK_MEAN = 12          # 黑帧均值上限
 
+# 界面/PPT 判定: 大量长横竖线 + 大面积单色底(实景照片/街景不具备)
+SCREEN_W = 240          # 分析用宽度
+EDGE_G = 28             # 梯度阈值
+MIN_LINE_LEN = 0.20     # 长直线: 横线 ≥20% 宽, 竖线 ≥20% 高
+SCREEN_LINES = 3        # 长直线条数下限(辅助, 排除纯自然单色如蓝天)
+SCREEN_FLAT = 0.32      # 主灰度占比下限(大面积纯色底; 实景实测 0.04~0.17)
+SCREEN_RATIO = 0.5      # 半数以上帧像界面/PPT => 判废
+
 
 def _sh(cmd, timeout=180):
     try:
@@ -116,6 +124,47 @@ def looks_like_subtitle(path):
     return ok, peak, runs, cover
 
 
+def screen_score(path):
+    """界面/PPT 特征: (长横线条数, 长竖线条数, 主灰度占比)
+    PPT/录屏 = 大量横竖矩形线框 + 大面积单色底; 实景照片两者都很低"""
+    im = Image.open(path).convert("L")
+    w0, h0 = im.size
+    im = im.resize((SCREEN_W, max(int(SCREEN_W * h0 / w0), 8)))
+    w, h = im.size
+    px = im.load()
+    min_h = max(int(w * MIN_LINE_LEN), 8)
+    min_v = max(int(h * MIN_LINE_LEN), 5)
+    hl = vl = 0
+    # 横线: y-1 -> y 有突变(垂直梯度), 且沿 x 连续
+    for y in range(1, h):
+        run = 0
+        for x in range(w):
+            if abs(px[x, y] - px[x, y - 1]) > EDGE_G:
+                run += 1
+                if run == min_h:
+                    hl += 1
+            else:
+                run = 0
+    # 竖线: x-1 -> x 有突变(水平梯度), 且沿 y 连续
+    for x in range(1, w):
+        run = 0
+        for y in range(h):
+            if abs(px[x, y] - px[x - 1, y]) > EDGE_G:
+                run += 1
+                if run == min_v:
+                    vl += 1
+            else:
+                run = 0
+    hist = im.histogram()
+    flat = max(hist) / max(w * h, 1)
+    return hl, vl, flat
+
+
+def looks_like_screen(path):
+    hl, vl, flat = screen_score(path)
+    return (hl + vl >= SCREEN_LINES) and (flat >= SCREEN_FLAT), hl, vl, flat
+
+
 def check_frames(frames):
     """字幕条判定。返回 (ok, reasons, metrics)"""
     n = len(frames)
@@ -126,7 +175,9 @@ def check_frames(frames):
         im = Image.open(f).convert("L")
         mean = sum(im.resize((1, 1), Image.BOX).getdata()) / 255 * 255
         ok, peak, runs, cover = looks_like_subtitle(f)
-        metrics.append({"f": i, "dark_mean": int(mean),
+        scr, hl, vl, flat = looks_like_screen(f)
+        metrics.append({"f": i, "dark_mean": int(mean), "screen": scr,
+                        "lines": hl + vl, "flat": round(flat, 2),
                         "ocr_words": ocr_words(f)})
         if ok:
             cand.append((i, peak, runs, cover))
@@ -136,6 +187,14 @@ def check_frames(frames):
     dark = sum(1 for m in metrics if m["dark_mean"] <= DARK_MEAN)
     if dark >= max(2, int(round(n * HIT_MIN_RATIO))):
         reasons.append(f"画面全黑/无内容 {dark}/{n}帧")
+        return False, reasons, metrics
+
+    # 界面演示 / PPT 画面(用户明确不要)
+    scr = sum(1 for m in metrics if m["screen"])
+    if scr >= max(2, int(round(n * SCREEN_RATIO))):
+        lines = sum(m["lines"] for m in metrics) // n
+        flat = sum(m["flat"] for m in metrics) / n
+        reasons.append(f"界面演示/PPT画面 {scr}/{n}帧(直线{lines}条 单色底{flat:.0%})")
         return False, reasons, metrics
 
     need = max(2, int(round(n * HIT_MIN_RATIO)))
