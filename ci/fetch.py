@@ -182,7 +182,43 @@ def clean():
                 pass
 
 
+REPO = "ideavic/yt-dl-agent"
+DONE_URLS = [
+    f"https://raw.githubusercontent.com/{REPO}/main/done.json",
+    f"https://api.github.com/repos/{REPO}/contents/done.json",
+]
+
+
+def fetch_done():
+    """已入库槽位清单: 排队中的重复构建据此跳过, 避免多开重复下载"""
+    for url in DONE_URLS:
+        r = sh(["curl", "-s", "-L", "--max-time", "25", url], 40)
+        if not r or r.returncode != 0 or not r.stdout.strip():
+            continue
+        txt = r.stdout.strip()
+        try:
+            d = json.loads(txt)
+            if isinstance(d, list):
+                return set(d)
+            # contents API 返回 base64
+            import base64
+            d = json.loads(base64.b64decode(d.get("content", "")).decode())
+            if isinstance(d, list):
+                return set(d)
+        except Exception:
+            continue
+    return set()
+
+
 report = []
+_done = fetch_done()
+_left = [j for j in JOBS if j["key"] not in _done]
+log(f"队列 {len(JOBS)} 条, 已完成 {len(JOBS) - len(_left)} 条, 待做 {len(_left)} 条")
+if not _left:
+    log("本批已全部完成(别的构建已收), 直接退出")
+    json.dump([], open("report.json", "w"))
+    raise SystemExit(0)
+
 for idx, job in enumerate(JOBS):
     if time.time() - T0 > BUDGET:
         log("预算耗尽, 停止")
@@ -190,6 +226,9 @@ for idx, job in enumerate(JOBS):
     key = job["key"]
     dest = os.path.join(OUT, job["filename"] + ".mp4")
     if os.path.exists(dest):
+        continue
+    if key in fetch_done():
+        log(f"{key} 已由其他构建完成, 跳过")
         continue
     log(f"===== ({idx+1}/{len(JOBS)}) {key} =====")
     dmin, dmax = int(job.get("dmin", 0)), int(job.get("dmax", 36000))
