@@ -9,6 +9,8 @@ skip_commits:
 
 environment:
   PROXY_ONLY: "1"
+  # 单 job 官方上限 60 分钟, 超时整批产物丢失; 预算 40 分钟给安装+上传留余量
+  BUDGET: "2400"
 clone_depth: 1
 shallow_clone: true
 
