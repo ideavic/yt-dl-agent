@@ -360,7 +360,7 @@ def run_job(idx, job):
         dur = c.get("duration") or 0
         log(f"候选{ci+1}/{len(cands)}: {title[:60]} | {dur}s")
         # 每条任务用不同的代理起点, 避免并发任务抢同一个代理
-        proxy_list = list(alive_proxies(8))
+        proxy_list = list(alive_proxies(8)) if PROXY_ONLY else []
         if proxy_list:
             off = (hash(key) + ci) % len(proxy_list)
             proxy_list = proxy_list[off:] + proxy_list[:off]
