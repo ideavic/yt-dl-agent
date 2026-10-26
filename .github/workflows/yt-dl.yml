@@ -9,30 +9,135 @@ on:
         description: "Output filename (no extension)"
         required: false
         default: "video"
+      max_height:
+        description: "Max video height"
+        required: false
+        default: "1080"
 
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - name: Install yt-dlp + bgutil PO Token provider
         run: |
-          pip install -U yt-dlp bgutil-ytdlp-pot-provider
+          pip install -U yt-dlp bgutil-ytdlp-pot-provider pysocks requests
           git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
           cd /tmp/bg/server
           npm ci --ignore-scripts
           npx tsc
           mkdir -p $HOME/bgutil-ytdlp-pot-provider
           cp -r /tmp/bg/server/* $HOME/bgutil-ytdlp-pot-provider/
+          yt-dlp --version
 
-      - name: Download video
+      - name: Try direct download (datacenter IP, may fail)
+        id: direct
+        continue-on-error: true
         run: |
           mkdir -p out
+          URL="${{ inputs.video_url }}"
+          OUT="out/${{ inputs.filename }}.%(ext)s"
           yt-dlp --js-runtimes node --remote-components ejs:github \
-            --no-warnings --extractor-args "youtube:fetch_pot=always" \
-            -f "bestvideo[height<=1080]" \
-            -o "out/${{ inputs.filename }}.%(ext)s" \
-            "${{ inputs.video_url }}"
+            --no-warnings \
+            --extractor-args "youtube:fetch_pot=always" \
+            --extractor-args "youtube:player_client=tv_samsung" \
+            --socket-timeout 20 --no-part --http-chunk-size 5M \
+            -f "bestvideo[height<=${{ inputs.max_height }}][ext=mp4]/bestvideo[height<=${{ inputs.max_height }}]/best" \
+            -o "$OUT" "$URL" || echo "direct_failed=1" >> $GITHUB_OUTPUT
+
+      - name: Download via residential proxy hop
+        if: steps.direct.outputs.direct_failed == '1'
+        run: |
+          mkdir -p out
+          URL="${{ inputs.video_url }}"
+          OUT="out/${{ inputs.filename }}.%(ext)s"
+          python3 << 'PYEOF'
+          import subprocess, concurrent.futures, random, sys
+
+          # 1. 拉取免费代理池 (墙外访问, 无 GFW 干扰)
+          lists = []
+          for url in [
+              "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+              "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+          ]:
+              try:
+                  r = subprocess.run(["curl","-s","-L","--max-time","30",url],
+                                     capture_output=True, text=True, timeout=40)
+                  if r.stdout: lists.append(r.stdout)
+              except Exception: pass
+
+          import re
+          proxies = []
+          for txt in lists:
+              for l in txt.splitlines():
+                  l = l.strip()
+                  if l.startswith("socks5://"):
+                      proxies.append("socks5h://" + l[8:])
+                  elif re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", l):
+                      proxies.append("http://" + l)
+          proxies = list(dict.fromkeys(proxies))
+          random.shuffle(proxies)
+          print(f"代理总数: {len(proxies)}")
+
+          # 2. 并发测活 (直接对 YouTube)
+          def test(p):
+              try:
+                  r = subprocess.run(["curl","-s","-x",p,"--max-time","8","-o","/dev/null",
+                                      "-w","%{http_code}","https://www.youtube.com/generate_204"],
+                                     capture_output=True, text=True, timeout=12)
+                  return p if r.stdout.strip().startswith("2") else None
+              except Exception: return None
+
+          alive = []
+          with concurrent.futures.ThreadPoolExecutor(200) as ex:
+              for x in ex.map(test, proxies[:8000]):
+                  if x: alive.append(x)
+          random.shuffle(alive)
+          print(f"对 YouTube 存活: {len(alive)}")
+          if not alive:
+              sys.exit("没有任何代理可用")
+
+          # 3. yt-dlp 实测 + 下载
+          import os
+          url = os.environ["VIDEO_URL"]
+          out = os.environ["OUT"]
+          maxh = os.environ.get("MAXH", "1080")
+          ok = False
+          for i, p in enumerate(alive[:20]):
+              print(f"--- 尝试 {i+1}/{min(20,len(alive))}: {p} ---")
+              try:
+                  r = subprocess.run(["yt-dlp",
+                      "--proxy", p,
+                      "--js-runtimes", "node",
+                      "--remote-components", "ejs:github",
+                      "--no-warnings",
+                      "--extractor-args", "youtube:fetch_pot=always",
+                      "--socket-timeout", "20",
+                      "--no-part", "--http-chunk-size", "5M",
+                      "-f", f"bestvideo[height<={maxh}][ext=mp4]/bestvideo[height<={maxh}]/best",
+                      "-o", out, url],
+                      capture_output=True, text=True, timeout=1500)
+                  if r.returncode == 0:
+                      print("下载成功 via", p)
+                      ok = True
+                      break
+                  tail = (r.stderr or "")[-300:].replace("\n", " ")
+                  print("失败:", tail)
+              except subprocess.TimeoutExpired:
+                  print("超时, 换下一个")
+          sys.exit(0 if ok else "所有代理尝试均失败")
+          PYEOF
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+          OUT: out/${{ inputs.filename }}.%(ext)s
+          MAXH: ${{ inputs.max_height }}
+
+      - name: Verify download
+        run: |
+          ls -lh out/
+          test -n "$(find out -name '*.mp4' -o -name '*.mkv' -o -name '*.webm' 2>/dev/null)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
