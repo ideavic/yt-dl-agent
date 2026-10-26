@@ -10,7 +10,7 @@ install:
   - python3 -m pip install -U --quiet yt-dlp bgutil-ytdlp-pot-provider pillow
   - git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
   - (cd /tmp/bg/server && npm ci --ignore-scripts && npx tsc)
-  - mkdir -p $HOME/bgutil-ytdlp-pot-provider && cp -r /tmp/bg/server/script /tmp/bg/server/build /tmp/bg/server/package.json $HOME/bgutil-ytdlp-pot-provider/
+  - mkdir -p $HOME/bgutil-ytdlp-pot-provider && cp -a /tmp/bg/server/. $HOME/bgutil-ytdlp-pot-provider/
 
 build_script:
   - python3 ci/fetch.py
