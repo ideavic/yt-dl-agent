@@ -213,7 +213,7 @@ for idx, job in enumerate(JOBS):
         samples = qc.grab_samples(vurl, YTDLP, work, "s", dur)
         frames = []
         for si, sp in enumerate(samples):
-            frames += qc.extract_frames(sp, work, f"f{si}", n=4)
+            frames += qc.extract_frames(sp, work, f"f{si}", n=8)
         if len(frames) < 3:
             log("  取样失败, 换源")
             qc_log.append({"cand": title, "pass": False, "why": "sample-failed"})
