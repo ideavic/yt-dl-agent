@@ -322,6 +322,28 @@ def download(url, dest, maxh, proxy=None, timeout=600, client=None):
     return False, (r.stderr or "")[-200:]
 
 
+def transcode(dest, budget_left):
+    """上传前 720p 重编码压缩(CRF26): artifact 下载有 1GB/天配额, 压一半等于配额翻倍。
+    只在压缩后确实更小(≥10%)才替换原件; 超时/失败/剩余预算不足则保留原件。"""
+    if os.environ.get("NO_TRANSCODE") == "1" or budget_left < 600:
+        return False
+    tmp = dest + ".tc.mp4"
+    r = sh(["ffmpeg", "-y", "-v", "error", "-i", dest,
+            "-vf", "scale='min(1280,iw)':-2",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", tmp], 480)
+    try:
+        if (r and r.returncode == 0 and os.path.exists(tmp)
+                and os.path.getsize(tmp) < os.path.getsize(dest) * 0.9):
+            os.replace(tmp, dest)
+            return True
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
+    return False
+
+
 def clean():
     for f in list(os.listdir(OUT)):
         if f.endswith((".part", ".ytdl")) or ".part-" in f:
@@ -516,6 +538,9 @@ def run_job(idx, job):
                     break
                 clean()
         if ok:
+            old_mb = os.path.getsize(dest) // 1048576
+            if transcode(dest, BUDGET - (time.time() - T0)):
+                log(f"    转码压缩: {old_mb}MB -> {os.path.getsize(dest) // 1048576}MB")
             strip = qc.build_strip(frames, os.path.join("qc", job["filename"] + ".jpg"))
             picked_title = title
             log(f"  留档拼图: {strip}")
