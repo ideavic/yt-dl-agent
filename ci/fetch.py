@@ -46,6 +46,15 @@ CHANNEL_BONUS = ["reuters", "associated press", "ap archive", "bloomberg", "cnbc
                  "dw news", "deutsche welle", "cna", "channel newsasia", "afp",
                  "al jazeera", "cbs", "nbc", "abc news", "sky news", "itn", "archival"]
 
+# 标题黑名单: 这些词的搜索结果几乎都是口播 vlog / 教程 / 屏录讲解(用户不要)
+TITLE_PENALTY = ["tutorial", "how to", "how i", "review", "vlog", "tips", "my story",
+                 "reaction", "podcast", "episode", "course", "beginner", "guide",
+                 "i tried", "i built", "day in the life", "explained", "walkthrough",
+                 "step by step", "top 5", "top 10", "mistakes", "secrets", "q&a"]
+# 标题白名单: 实拍/素材信号词
+TITLE_BONUS = ["b-roll", "broll", "footage", "aerial", "drone", "4k", "cinematic",
+               "news", "archive", "timelapse", "time lapse", "montage", "shots"]
+
 
 def log(m):
     print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
@@ -111,6 +120,11 @@ def pick_all(query, dmin, dmax, proxy=None, limit=6):
             score += 2
         if (e.get("view_count") or 0) > 10000:
             score += 1
+        tl = title.lower()
+        if any(w in tl for w in TITLE_PENALTY):
+            score -= 4     # 口播/教程向标题重罚, 基本沉底
+        if any(w in tl for w in TITLE_BONUS):
+            score += 2     # 素材/实拍向标题加分
         # 竖屏优先(用户偏好, 软性加分不硬筛)
         res = e.get("resolution") or ""
         if "x" in res:
