@@ -24,10 +24,10 @@ def probe_dur(path):
         return 0.0
 
 
-def grab_samples(url, ytdlp_base, workdir, key, dur):
+def grab_samples(url, ytdlp_base, workdir, key, dur, proxy=None):
     """下最低画质的整片(体积很小)用于抽帧质检; 返回 (文件列表, 错误信息)"""
     out = os.path.join(workdir, f"{key}_low.mp4")
-    cmd = list(ytdlp_base) + [
+    cmd = list(ytdlp_base) + (["--proxy", proxy] if proxy else []) + [
         "-f", "bv*[height<=360]+ba/b[height<=360]/b/worst",
         "--merge-output-format", "mp4",
         "-o", out, url]
