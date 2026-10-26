@@ -3,25 +3,29 @@ on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: "YouTube video URL"
+        description: "YouTube URL, or 'ytsearch:关键词' for search"
         required: true
       filename:
         description: "Output filename (no extension)"
         required: false
         default: "video"
-      max_height:
-        description: "Max video height"
+      dmin:
+        description: "Min duration seconds"
         required: false
-        default: "1080"
+        default: "0"
+      dmax:
+        description: "Max duration seconds"
+        required: false
+        default: "36000"
 
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 45
     steps:
       - name: Install yt-dlp + bgutil PO Token provider
         run: |
-          pip install -U yt-dlp bgutil-ytdlp-pot-provider pysocks requests
+          pip install -U yt-dlp bgutil-ytdlp-pot-provider pysocks
           git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
           cd /tmp/bg/server
           npm ci --ignore-scripts
@@ -30,118 +34,170 @@ jobs:
           cp -r /tmp/bg/server/* $HOME/bgutil-ytdlp-pot-provider/
           yt-dlp --version
 
-      - name: Try direct download (datacenter IP, may fail)
-        id: direct
-        continue-on-error: true
+      - name: Search + Download
         run: |
           mkdir -p out
-          URL="${{ inputs.video_url }}"
-          OUT="out/${{ inputs.filename }}.%(ext)s"
-          yt-dlp --js-runtimes node --remote-components ejs:github \
-            --no-warnings \
-            --extractor-args "youtube:fetch_pot=always" \
-            --extractor-args "youtube:player_client=tv_samsung" \
-            --socket-timeout 20 --no-part --http-chunk-size 5M \
-            -f "bestvideo[height<=${{ inputs.max_height }}][ext=mp4]/bestvideo[height<=${{ inputs.max_height }}]/best" \
-            -o "$OUT" "$URL" || echo "direct_failed=1" >> $GITHUB_OUTPUT
-
-      - name: Download via residential proxy hop
-        if: steps.direct.outputs.direct_failed == '1'
-        run: |
-          mkdir -p out
-          URL="${{ inputs.video_url }}"
-          OUT="out/${{ inputs.filename }}.%(ext)s"
           python3 << 'PYEOF'
-          import subprocess, concurrent.futures, random, sys
+          import subprocess, concurrent.futures, random, re, os, sys, json
 
-          # 1. 拉取免费代理池 (墙外访问, 无 GFW 干扰)
-          lists = []
-          for url in [
-              "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-              "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-          ]:
+          VIDEO_URL = os.environ["VIDEO_URL"]
+          OUT = os.environ["OUT"]
+          DMIN = int(os.environ.get("DMIN", "0") or 0)
+          DMAX = int(os.environ.get("DMAX", "36000") or 36000)
+
+          YTDLP_BASE = ["yt-dlp", "--js-runtimes", "node", "--remote-components", "ejs:github",
+                        "--no-warnings", "--extractor-args", "youtube:fetch_pot=always",
+                        "--socket-timeout", "20", "--no-part", "--http-chunk-size", "5M"]
+
+          CHANNEL_BONUS = ["reuters","associated press","ap archive","bloomberg","cnbc","bbc",
+                           "dw news","deutsche welle","cna","channel newsasia","afp","al jazeera",
+                           "cbs","nbc","abc news","sky news","itn","archival"]
+
+          def ascii_ratio(s):
+              if not s: return 0
+              return sum(1 for c in s if ord(c) < 128) / len(s)
+
+          def pick_from_search(query, proxy=None):
+              cmd = YTDLP_BASE + (["--proxy", proxy] if proxy else []) + [
+                    "--flat-playlist", "--dump-single-json", f"ytsearch10:{query}"]
               try:
-                  r = subprocess.run(["curl","-s","-L","--max-time","30",url],
-                                     capture_output=True, text=True, timeout=40)
-                  if r.stdout: lists.append(r.stdout)
-              except Exception: pass
-
-          import re
-          proxies = []
-          for txt in lists:
-              for l in txt.splitlines():
-                  l = l.strip()
-                  if l.startswith("socks5://"):
-                      proxies.append("socks5h://" + l[8:])
-                  elif re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", l):
-                      proxies.append("http://" + l)
-          proxies = list(dict.fromkeys(proxies))
-          random.shuffle(proxies)
-          print(f"代理总数: {len(proxies)}")
-
-          # 2. 并发测活 (直接对 YouTube)
-          def test(p):
-              try:
-                  r = subprocess.run(["curl","-s","-x",p,"--max-time","8","-o","/dev/null",
-                                      "-w","%{http_code}","https://www.youtube.com/generate_204"],
-                                     capture_output=True, text=True, timeout=12)
-                  return p if r.stdout.strip().startswith("2") else None
-              except Exception: return None
-
-          alive = []
-          with concurrent.futures.ThreadPoolExecutor(200) as ex:
-              for x in ex.map(test, proxies[:8000]):
-                  if x: alive.append(x)
-          random.shuffle(alive)
-          print(f"对 YouTube 存活: {len(alive)}")
-          if not alive:
-              sys.exit("没有任何代理可用")
-
-          # 3. yt-dlp 实测 + 下载
-          import os
-          url = os.environ["VIDEO_URL"]
-          out = os.environ["OUT"]
-          maxh = os.environ.get("MAXH", "1080")
-          ok = False
-          for i, p in enumerate(alive[:20]):
-              print(f"--- 尝试 {i+1}/{min(20,len(alive))}: {p} ---")
-              try:
-                  r = subprocess.run(["yt-dlp",
-                      "--proxy", p,
-                      "--js-runtimes", "node",
-                      "--remote-components", "ejs:github",
-                      "--no-warnings",
-                      "--extractor-args", "youtube:fetch_pot=always",
-                      "--socket-timeout", "20",
-                      "--no-part", "--http-chunk-size", "5M",
-                      "-f", f"bestvideo[height<={maxh}][ext=mp4]/bestvideo[height<={maxh}]/best",
-                      "-o", out, url],
-                      capture_output=True, text=True, timeout=1500)
-                  if r.returncode == 0:
-                      print("下载成功 via", p)
-                      ok = True
-                      break
-                  tail = (r.stderr or "")[-300:].replace("\n", " ")
-                  print("失败:", tail)
+                  r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
               except subprocess.TimeoutExpired:
-                  print("超时, 换下一个")
-          sys.exit(0 if ok else "所有代理尝试均失败")
+                  return None
+              if r.returncode != 0 or not (r.stdout or "").strip().startswith("{"):
+                  return None
+              try:
+                  entries = json.loads(r.stdout).get("entries") or []
+              except Exception:
+                  return None
+              best, best_score = None, -99
+              for e in entries:
+                  t = e.get("title") or ""
+                  dur = e.get("duration") or 0
+                  ch = (e.get("channel") or e.get("uploader") or "").lower()
+                  if DMIN and dur < DMIN * 0.85: continue
+                  if DMAX and dur > DMAX * 1.2: continue
+                  if ascii_ratio(t) < 0.8: continue
+                  if any(w in t.lower() for w in ["中字","字幕","搬运","解说","reaction","full episode"]): continue
+                  score = 2
+                  if any(c in ch for c in CHANNEL_BONUS): score += 5
+                  if 60 <= dur <= 1200: score += 2
+                  if (e.get("view_count") or 0) > 10000: score += 1
+                  if score > best_score:
+                      best_score, best = score, e
+              return best
+
+          def get_alive_proxies(limit=15):
+              lists = []
+              for url in [
+                  "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+                  "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+                  "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+                  "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+              ]:
+                  try:
+                      r = subprocess.run(["curl","-s","-L","--max-time","30",url],
+                                         capture_output=True, text=True, timeout=40)
+                      if r.stdout: lists.append(r.stdout)
+                  except Exception: pass
+              proxies = []
+              for txt in lists:
+                  for l in txt.splitlines():
+                      l = l.strip()
+                      if l.startswith("socks5://"):
+                          proxies.append("socks5h://" + l[8:])
+                      elif re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", l):
+                          proxies.append("http://" + l)
+              proxies = list(dict.fromkeys(proxies))
+              random.shuffle(proxies)
+              print(f"代理总数: {len(proxies)}")
+              def test(p):
+                  try:
+                      r = subprocess.run(["curl","-s","-x",p,"--max-time","8","-o","/dev/null",
+                                          "-w","%{http_code}","https://www.youtube.com/generate_204"],
+                                         capture_output=True, text=True, timeout=12)
+                      return p if r.stdout.strip().startswith("2") else None
+                  except Exception: return None
+              alive = []
+              with concurrent.futures.ThreadPoolExecutor(200) as ex:
+                  for x in ex.map(test, proxies[:8000]):
+                      if x: alive.append(x)
+              random.shuffle(alive)
+              print(f"对 YouTube 存活: {len(alive)}")
+              return alive[:limit]
+
+          def ytdlp_download(url, proxy=None, timeout=1500):
+              cmd = YTDLP_BASE + (["--proxy", proxy] if proxy else []) + [
+                    "-f", "bestvideo[height<=1080][ext=mp4]/bestvideo[height<=1080]/best",
+                    "-o", OUT, url]
+              try:
+                  r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                  return r.returncode == 0, (r.stderr or "")[-300:]
+              except subprocess.TimeoutExpired:
+                  return False, "timeout"
+
+          def clean_part():
+              for f in os.listdir("out"):
+                  if f.endswith((".part", ".ytdl")) or ".part-" in f:
+                      os.remove(os.path.join("out", f))
+
+          # ========== 1. 解析搜索 ==========
+          target = VIDEO_URL
+          if VIDEO_URL.startswith("ytsearch:"):
+              query = VIDEO_URL[9:]
+              print(f"搜索模式: {query}")
+              picked = pick_from_search(query)  # 先直连搜
+              if not picked:
+                  alive = get_alive_proxies(limit=6)
+                  for p in alive:
+                      picked = pick_from_search(query, proxy=p)
+                      if picked: break
+              if not picked:
+                  sys.exit("搜索失败: 没有匹配的视频")
+              vid = picked.get("id")
+              title = picked.get("title")
+              ch = picked.get("channel") or picked.get("uploader") or ""
+              print(f"选中: {title} | {ch} | youtu.be/{vid}")
+              with open("out/_picked.txt", "w") as f:
+                  f.write(f"{title}\n{ch}\nhttps://www.youtube.com/watch?v={vid}\n")
+              target = f"https://www.youtube.com/watch?v={vid}"
+
+          # ========== 2. 下载: 先直连, 失败走代理跳板 ==========
+          ok, err = ytdlp_download(target)
+          if ok:
+              print("直连下载成功")
+              sys.exit(0)
+
+          print(f"直连失败: {err}")
+          clean_part()
+
+          alive = get_alive_proxies(limit=15)
+          if not alive:
+              sys.exit("无可用代理")
+          for i, p in enumerate(alive):
+              print(f"--- 代理尝试 {i+1}/{len(alive)}: {p} ---")
+              clean_part()
+              ok, err = ytdlp_download(target, proxy=p)
+              if ok:
+                  print(f"下载成功 via {p}")
+                  sys.exit(0)
+              print("失败:", err.replace("\n", " "))
+          sys.exit("所有代理尝试均失败")
           PYEOF
         env:
           VIDEO_URL: ${{ inputs.video_url }}
           OUT: out/${{ inputs.filename }}.%(ext)s
-          MAXH: ${{ inputs.max_height }}
+          DMIN: ${{ inputs.dmin }}
+          DMAX: ${{ inputs.dmax }}
 
       - name: Verify download
         run: |
           ls -lh out/
-          test -n "$(find out -name '*.mp4' -o -name '*.mkv' -o -name '*.webm' 2>/dev/null)"
+          test -n "$(find out -type f \( -name '*.mp4' -o -name '*.mkv' -o -name '*.webm' \) 2>/dev/null)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.filename }}
           path: out/
-          retention-days: 3
+          retention-days: 1
