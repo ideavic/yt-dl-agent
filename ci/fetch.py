@@ -43,6 +43,20 @@ def ascii_ratio(s):
     return sum(1 for c in s if ord(c) < 128) / len(s)
 
 
+_STOP = {"the", "a", "an", "of", "for", "to", "and", "in", "on", "with", "how",
+         "what", "is", "are", "this", "that", "your", "you", "it", "best", "new"}
+
+
+def relevant(title, query, need=0.5):
+    """标题必须覆盖查询词的一半以上实词, 防止 agent->特工/影评 这类误配"""
+    toks = [w for w in re.findall(r"[a-z]{3,}", query.lower()) if w not in _STOP]
+    if not toks:
+        return True
+    t = title.lower()
+    hit = sum(1 for w in toks if w in t)
+    return hit / len(toks) >= need
+
+
 def pick(query, dmin, dmax, proxy=None):
     cmd = YTDLP + (["--proxy", proxy] if proxy else []) + [
         "--flat-playlist", "--dump-single-json", f"ytsearch10:{query}"]
@@ -65,6 +79,8 @@ def pick(query, dmin, dmax, proxy=None):
         if ascii_ratio(title) < 0.8:
             continue
         if any(w in title.lower() for w in ["中字", "字幕", "搬运", "解说", "reaction"]):
+            continue
+        if not relevant(title, query):
             continue
         score = 2
         if any(c in ch for c in CHANNEL_BONUS):
@@ -163,9 +179,11 @@ for idx, job in enumerate(JOBS):
     if src.startswith("ytsearch:"):
         query = src[9:]
         hit = pick(query, dmin, dmax)
+        picked_title = hit.get("title") if hit else ""
         if not hit:
             for p in alive_proxies(4)[:3]:
                 hit = pick(query, dmin, dmax, p)
+                picked_title = hit.get("title") if hit else ""
                 if hit:
                     break
         if not hit:
@@ -174,6 +192,8 @@ for idx, job in enumerate(JOBS):
             continue
         log(f"选中: {hit.get('title')} | {hit.get('duration')}s")
         src = f"https://www.youtube.com/watch?v={hit['id']}"
+    else:
+        picked_title = ""
 
     ok, why = download(src, dest, maxh)
     if not ok:
@@ -189,7 +209,8 @@ for idx, job in enumerate(JOBS):
     if ok:
         size = os.path.getsize(dest) // 1048576
         log(f"{key} ✓ {size}MB")
-        report.append({"key": key, "ok": True, "file": os.path.basename(dest), "mb": size})
+        report.append({"key": key, "ok": True, "file": os.path.basename(dest),
+                       "mb": size, "title": picked_title})
     else:
         log(f"{key} ✗ {why[:120]}")
         report.append({"key": key, "ok": False, "why": why[:120]})
