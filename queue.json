@@ -9,10 +9,74 @@
    "maxh": "720"
   },
   {
+   "key": "03_P1-1",
+   "filename": "t03_P1_1",
+   "url": "ytsearch:AI chatbot for local business",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "03_P2-1",
+   "filename": "t03_P2_1",
+   "url": "ytsearch:small business owner shop counter",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
    "key": "03_P3-1",
    "filename": "t03_P3_1",
    "url": "ytsearch:AI chatbot customer service demo",
    "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "05_P1-1",
+   "filename": "t05_P1_1",
+   "url": "ytsearch:AI agent runs business",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "05_P2-1",
+   "filename": "t05_P2_1",
+   "url": "ytsearch:unmanned convenience store robot cafe",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "05_P3-1",
+   "filename": "t05_P3_1",
+   "url": "ytsearch:robot server restaurant",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "05_P4-1",
+   "filename": "t05_P4_1",
+   "url": "ytsearch:cashierless checkout smart store",
+   "dmin": 45,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "06_P1-1",
+   "filename": "t06_P1_1",
+   "url": "ytsearch:AI CEO company experiment",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "06_P2-1",
+   "filename": "t06_P2_1",
+   "url": "ytsearch:corporate boardroom meeting business",
+   "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   }
