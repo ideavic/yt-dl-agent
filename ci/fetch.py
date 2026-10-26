@@ -47,7 +47,7 @@ _STOP = {"the", "a", "an", "of", "for", "to", "and", "in", "on", "with", "how",
          "what", "is", "are", "this", "that", "your", "you", "it", "best", "new"}
 
 
-def relevant(title, query, need=0.5):
+def relevant(title, query, need=0.4):
     """标题必须覆盖查询词的一半以上实词, 防止 agent->特工/影评 这类误配"""
     toks = [w for w in re.findall(r"[a-z]{3,}", query.lower()) if w not in _STOP]
     if not toks:
