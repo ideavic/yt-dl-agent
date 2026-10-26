@@ -24,7 +24,9 @@ T0 = time.time()
 
 YTDLP = ["yt-dlp", "--no-warnings", "--socket-timeout", "20",
          "--no-part", "--http-chunk-size", "5M", "--retries", "2",
-         "--js-runtimes", "node", "--remote-components", "ejs:github"]
+         "--js-runtimes", "node", "--remote-components", "ejs:github",
+         "--extractor-args", "youtube:fetch_pot=always",
+         "--sleep-requests", "1"]
 
 CHANNEL_BONUS = ["reuters", "associated press", "ap archive", "bloomberg", "cnbc", "bbc",
                  "dw news", "deutsche welle", "cna", "channel newsasia", "afp",
