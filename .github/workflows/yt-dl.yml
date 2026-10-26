@@ -74,6 +74,12 @@ jobs:
               return sum(1 for c in s if ord(c) < 128) / len(s)
 
           def pick_from_search(query, proxy=None):
+              STOP = {"the","a","an","of","for","to","and","in","on","with","how","what","is","are","this","that","your","you","it","best","new"}
+              toks = [w for w in re.findall(r"[a-z]{3,}", query.lower()) if w not in STOP]
+              def relevant(title):
+                  if not toks: return True
+                  t = (title or "").lower()
+                  return sum(1 for w in toks if w in t) / len(toks) >= 0.5
               cmd = YTDLP_BASE + (["--proxy", proxy] if proxy else []) + [
                     "--flat-playlist", "--dump-single-json", f"ytsearch10:{query}"]
               try:
@@ -95,6 +101,7 @@ jobs:
                   if DMAX and dur > DMAX * 1.2: continue
                   if ascii_ratio(t) < 0.8: continue
                   if any(w in t.lower() for w in ["中字","字幕","搬运","解说","reaction","full episode"]): continue
+                  if not relevant(t): continue
                   score = 2
                   if any(c in ch for c in CHANNEL_BONUS): score += 5
                   if 60 <= dur <= 1200: score += 2
