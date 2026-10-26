@@ -9,8 +9,13 @@ import subprocess
 import sys
 import time
 
+import qc
+
 OUT = "out"
+TMP = "work"
 os.makedirs(OUT, exist_ok=True)
+os.makedirs(TMP, exist_ok=True)
+os.makedirs("qc", exist_ok=True)
 
 QUEUE = json.load(open("queue.json"))
 JOBS = QUEUE.get("jobs", [])
@@ -57,17 +62,18 @@ def relevant(title, query, need=0.4):
     return hit / len(toks) >= need
 
 
-def pick(query, dmin, dmax, proxy=None):
+def pick_all(query, dmin, dmax, proxy=None, limit=6):
+    """返回按评分排序的候选列表 (供逐个质检换源)"""
     cmd = YTDLP + (["--proxy", proxy] if proxy else []) + [
         "--flat-playlist", "--dump-single-json", f"ytsearch10:{query}"]
     r = sh(cmd, 90)
     if not r or r.returncode != 0 or not (r.stdout or "").strip().startswith("{"):
-        return None
+        return []
     try:
         entries = json.loads(r.stdout).get("entries") or []
     except Exception:
-        return None
-    best, best_score = None, -99
+        return []
+    scored = []
     for e in entries:
         title = e.get("title") or ""
         dur = e.get("duration") or 0
@@ -89,9 +95,9 @@ def pick(query, dmin, dmax, proxy=None):
             score += 2
         if (e.get("view_count") or 0) > 10000:
             score += 1
-        if score > best_score:
-            best_score, best = score, e
-    return best
+        scored.append((score, dur, e))
+    scored.sort(key=lambda x: -x[0])
+    return [e for _, _, e in scored[:limit]]
 
 
 _POOL = None
@@ -178,42 +184,72 @@ for idx, job in enumerate(JOBS):
 
     if src.startswith("ytsearch:"):
         query = src[9:]
-        hit = pick(query, dmin, dmax)
-        picked_title = hit.get("title") if hit else ""
-        if not hit:
+        cands = pick_all(query, dmin, dmax)
+        if not cands:
             for p in alive_proxies(4)[:3]:
-                hit = pick(query, dmin, dmax, p)
-                picked_title = hit.get("title") if hit else ""
-                if hit:
+                cands = pick_all(query, dmin, dmax, p)
+                if cands:
                     break
-        if not hit:
+        if not cands:
             log(f"{key} 搜索无结果")
             report.append({"key": key, "ok": False, "why": "no-search-result"})
             continue
-        log(f"选中: {hit.get('title')} | {hit.get('duration')}s")
-        src = f"https://www.youtube.com/watch?v={hit['id']}"
     else:
-        picked_title = ""
+        cands = [{"id": src.rsplit("=", 1)[-1], "title": "", "duration": 0}]
 
-    ok, why = download(src, dest, maxh)
-    if not ok:
-        log(f"直连失败({why[:80]}), 走代理")
-        clean()
-        for p in alive_proxies(6):
-            if time.time() - T0 > BUDGET:
-                break
-            ok, why = download(src, dest, maxh, p, timeout=900)
-            if ok:
-                break
+    # ===== 逐个候选: 取样质检(便宜) -> 通过才正式下载(贵) =====
+    picked_title = ""
+    ok, why = False, "qc-rejected"
+    qc_log = []
+    for ci, c in enumerate(cands):
+        if time.time() - T0 > BUDGET:
+            break
+        vurl = f"https://www.youtube.com/watch?v={c['id']}" if c.get("id") else src
+        title = c.get("title") or ""
+        dur = c.get("duration") or 0
+        log(f"候选{ci+1}/{len(cands)}: {title[:60]} | {dur}s")
+        work = os.path.join(TMP, f"{job['filename']}_c{ci}")
+        os.makedirs(work, exist_ok=True)
+        samples = qc.grab_samples(vurl, YTDLP, work, "s", dur)
+        frames = []
+        for si, sp in enumerate(samples):
+            frames += qc.extract_frames(sp, work, f"f{si}", n=4)
+        if len(frames) < 3:
+            log("  取样失败, 换源")
+            qc_log.append({"cand": title, "pass": False, "why": "sample-failed"})
+            continue
+        passed, reasons, metrics = qc.check_frames(frames)
+        qc_log.append({"cand": title, "pass": passed,
+                       "why": "; ".join(reasons) or "ok", "metrics": metrics})
+        if not passed:
+            log(f"  质检不过: {'; '.join(reasons)[:90]} → 换源")
+            continue
+        log("  质检通过, 开始正式下载")
+        ok, why = download(vurl, dest, maxh)
+        if not ok:
+            log(f"  直连失败({why[:60]}), 走代理")
             clean()
+            for p in alive_proxies(4):
+                if time.time() - T0 > BUDGET:
+                    break
+                ok, why = download(vurl, dest, maxh, p, timeout=900)
+                if ok:
+                    break
+                clean()
+        if ok:
+            strip = qc.build_strip(frames, os.path.join("qc", job["filename"] + ".jpg"))
+            picked_title = title
+            log(f"  留档拼图: {strip}")
+            break
+
     if ok:
         size = os.path.getsize(dest) // 1048576
         log(f"{key} ✓ {size}MB")
         report.append({"key": key, "ok": True, "file": os.path.basename(dest),
-                       "mb": size, "title": picked_title})
+                       "mb": size, "title": picked_title, "qc": qc_log})
     else:
         log(f"{key} ✗ {why[:120]}")
-        report.append({"key": key, "ok": False, "why": why[:120]})
+        report.append({"key": key, "ok": False, "why": why[:120], "qc": qc_log})
 
 json.dump(report, open("report.json", "w"), ensure_ascii=False, indent=1)
 log(f"完成 {sum(1 for r in report if r['ok'])}/{len(JOBS)}")
