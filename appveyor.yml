@@ -1,6 +1,9 @@
 version: '{build}'
 image: Ubuntu2204
 build: off
+
+environment:
+  PROXY_ONLY: "1"
 clone_depth: 1
 shallow_clone: true
 
