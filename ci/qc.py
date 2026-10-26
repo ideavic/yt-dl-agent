@@ -25,20 +25,16 @@ def probe_dur(path):
 
 
 def grab_samples(url, ytdlp_base, workdir, key, dur):
-    """只下最低清晰度的短片段, 成本约 1-2MB"""
-    outs = []
-    for i, (pos, length) in enumerate(SAMPLES):
-        start = max(2, int(dur * pos)) if dur else 5
-        out = os.path.join(workdir, f"{key}_s{i}.mp4")
-        cmd = list(ytdlp_base) + [
-            "-f", "worst[height<=360]/worst",
-            "--download-sections", f"*{start}-{start + length}",
-            "--force-keyframes-at-cuts",
-            "-o", out, url]
-        r = _sh(cmd, 240)
-        if r and r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 20000:
-            outs.append(out)
-    return outs
+    """下最低画质的整片(体积很小)用于抽帧质检"""
+    out = os.path.join(workdir, f"{key}_low.mp4")
+    cmd = list(ytdlp_base) + [
+        "-f", "worst[height<=360]/worst",
+        "--max-filesize", "120M",
+        "-o", out, url]
+    r = _sh(cmd, 900)
+    if r and os.path.exists(out) and os.path.getsize(out) > 50000:
+        return [out]
+    return []
 
 
 def extract_frames(video, outdir, prefix, n=4, width=360):
