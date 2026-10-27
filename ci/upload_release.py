@@ -18,7 +18,9 @@ def api(url, method="GET", body=None, ctype="application/json"):
         headers={"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github+json",
                  "Content-Type": ctype, "User-Agent": "ci-uploader"},
         method=method)
-    data = body
+    data = None
+    if body is not None:
+        data = body if isinstance(body, (bytes, bytearray)) else json.dumps(body).encode()
     with urllib.request.urlopen(req, data=data, timeout=300) as r:
         txt = r.read()
     return json.loads(txt) if txt[:1] in (b"{", b"[") else {}
