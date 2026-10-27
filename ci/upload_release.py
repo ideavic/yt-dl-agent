@@ -4,6 +4,7 @@
 需要环境变量 GH_TOKEN(有 repo 权限); 没有则静默跳过, 走 artifacts 兜底。"""
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 
@@ -28,7 +29,9 @@ def api(url, method="GET", body=None, ctype="application/json"):
 
 def main():
     files = sorted(os.path.join("out", f) for f in os.listdir("out") if f.endswith(".mp4"))
-    files += sorted(os.path.join("qc", f) for f in os.listdir("qc") if f.endswith(".jpg"))
+    # 只上传最终采用的质检拼图; 被拒候选拼图(_cN)用户不需要, 不上传
+    files += sorted(os.path.join("qc", f) for f in os.listdir("qc")
+                    if f.endswith(".jpg") and not re.search(r"_c\d+\.jpg$", f))
     if os.path.exists("report.json"):
         files.append("report.json")
     files = [f for f in files if os.path.getsize(f) > 0]

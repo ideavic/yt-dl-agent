@@ -331,7 +331,7 @@ def transcode(dest, budget_left):
     r = sh(["ffmpeg", "-y", "-v", "error", "-i", dest,
             "-vf", "scale='min(1280,iw)':-2",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
-            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", tmp], 480)
+            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", tmp], 1200)
     try:
         if (r and r.returncode == 0 and os.path.exists(tmp)
                 and os.path.getsize(tmp) < os.path.getsize(dest) * 0.9):
@@ -503,7 +503,6 @@ def run_job(idx, job):
             qc_log.append({"cand": title, "pass": False,
                            "why": f"sample-failed s={len(samples)} f={len(frames)} {serr[:120]}"})
             continue
-        qc.build_strip(frames, os.path.join("qc", f"{job['filename']}_c{ci}.jpg"))
         passed, reasons, metrics = qc.check_frames(frames)
         qc_log.append({"cand": title, "pass": passed,
                        "why": "; ".join(reasons) or "ok", "metrics": metrics})
