@@ -141,6 +141,26 @@ def thumb_faces(video_id):
             pass
 
 
+def probe_quality(vurl, proxy=None):
+    """下载前只解析元数据不碰视频流: 返回 (可用最高高度, True)。
+    解析失败返回 (0, False) —— 由调用方决定是否仍走取样兜底。"""
+    for cl in [None, "android", "tv"]:
+        cmd = ytdlp_args(cl) + (["--proxy", proxy] if proxy else []) + [
+            "--skip-download", "--dump-single-json", vurl]
+        r = sh(cmd, 75)
+        if not r or r.returncode != 0 or not (r.stdout or "").strip().startswith("{"):
+            continue
+        try:
+            data = json.loads(r.stdout)
+        except Exception:
+            continue
+        hs = [f.get("height") or 0 for f in (data.get("formats") or [])]
+        hs.append(data.get("height") or 0)
+        if hs:
+            return max(hs), True
+    return 0, False
+
+
 def pick_all(query, dmin, dmax, proxy=None, limit=6):
     """返回按评分排序的候选列表 (供逐个质检换源)"""
     cmd = YTDLP + (["--proxy", proxy] if proxy else []) + [
@@ -476,6 +496,21 @@ def run_job(idx, job):
         if proxy_list:
             off = (hash(key) + ci) % len(proxy_list)
             proxy_list = proxy_list[off:] + proxy_list[:off]
+        # ===== 清晰度门槛(用户规则): 下载任何东西之前先查可用最高分辨率,
+        # 源没有 720p 直接换源, 不浪费取样和下载 =====
+        max_h, pok = probe_quality(vurl)
+        if not pok and PROXY_ONLY and proxy_list:
+            max_h, pok = probe_quality(vurl, proxy_list[0])
+        if pok:
+            if max_h < 720:
+                log(f"  清晰度不足(源最高 {max_h}p < 720p), 不下载直接换源")
+                qc_log.append({"cand": title, "pass": False,
+                               "why": f"low-res: source max {max_h}p"})
+                continue
+            log(f"  清晰度合格(源最高 {max_h}p)")
+            dur = dur or (0)
+        elif not dur:
+            log("  清晰度探测失败, 交给取样流程兜底")
         work = os.path.join(TMP, f"{job['filename']}_c{ci}")
         os.makedirs(work, exist_ok=True)
         samples, serr = [], ""
