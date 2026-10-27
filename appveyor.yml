@@ -17,7 +17,9 @@ shallow_clone: true
 install:
   - sudo apt-get update -qq
   - sudo apt-get install -y -qq ffmpeg tesseract-ocr tesseract-ocr-chi-sim
-  - python3 -m pip install -U --quiet yt-dlp bgutil-ytdlp-pot-provider pillow opencv-python-headless
+  # opencv 必须钉 4.x: 5.x 移除了 CascadeClassifier, 人脸检测会静默失效(口播博主全漏)
+  - python3 -m pip install -U --quiet yt-dlp bgutil-ytdlp-pot-provider pillow
+  - python3 -m pip install --quiet opencv-python-headless==4.11.0.86
   - git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /tmp/bg
   - (cd /tmp/bg/server && npm ci --ignore-scripts && npx tsc)
   - mkdir -p $HOME/bgutil-ytdlp-pot-provider && cp -a /tmp/bg/server/. $HOME/bgutil-ytdlp-pot-provider/
