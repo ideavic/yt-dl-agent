@@ -22,7 +22,7 @@ BAND_TOP = 0.72         # 字幕带: 画面高度 72% ~ 100%
 LIT = 195               # 亮色像素阈值(白字)
 COLS = 120              # 列投影精度
 ROW_BOTTOM_MIN = 0.10   # 文字行必须在字幕带的下部(即画面 >=75% 高, 兼顾偏上的字幕)
-MIN_LIT_COLS = 0.25     # 亮列占画面宽 >=25%(字幕横贯; 角落 logo 只有 ~13%)
+MIN_LIT_COLS = 0.15     # 亮列占画面宽 >=15%(新闻包装条实测 0.19; 角落 logo 只有 ~13%)
 MIN_RUNS = 4            # 亮块段数 >=4 => 断续文字(有词间距); logo 是 1 段连续块
 ROW_STD_MAX = 4.0       # 文字行位置标准差(px)上限 => 行固定
 HIT_MIN_RATIO = 0.6     # 至少 60% 帧命中才判字幕
@@ -39,6 +39,10 @@ SCREEN_RATIO = 0.5      # 半数以上帧像 PPT => 判废(产品界面不算)
 # PPT 特征: 大面积白底 + 无彩色。产品界面多为深色底或彩色元素丰富, 据此放行
 PPT_BRIGHT = 140        # 平均亮度下限(PPT 白底实测 >180, 产品界面深色底 <120)
 PPT_SAT = 0.12          # 高饱和像素占比上限(PPT 彩色极少; 软件界面常有大量彩色)
+
+# 人脸检测(帧级): 主播/口播博主/采访出镜 -> 拒(用户规则: 不要有人对镜头讲话的画面)
+FACE_MIN_RATIO = 0.18   # 最大脸宽 >= 画面宽 18% 算"明显出镜"(路人小脸不受影响)
+FACE_HIT_RATIO = 0.4    # >=40% 帧有明显人脸 => 拒
 
 
 def _sh(cmd, timeout=180):
@@ -211,12 +215,46 @@ def looks_like_screen(path):
     return screen_like, ppt_like, hl, vl, flat, mean, sat
 
 
+def _face_detector():
+    """OpenCV Haar 人脸检测器; cv2 不可用返回 None(优雅跳过)"""
+    try:
+        import cv2
+        det = cv2.CascadeClassifier(cv2.data.haarcascades
+                                    + "haarcascade_frontalface_default.xml")
+        return None if det.empty() else det
+    except Exception:
+        return None
+
+
+def face_hits(frames, det=None):
+    """各帧最大人脸占比列表。det=None 时返回全 0(不拦截)。"""
+    if det is None:
+        det = _face_detector()
+    if det is None:
+        return [0.0] * len(frames)
+    import cv2
+    out = []
+    for f in frames:
+        try:
+            img = cv2.imread(f)
+            if img is None:
+                out.append(0.0)
+                continue
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            faces = det.detectMultiScale(gray, 1.15, 5, minSize=(36, 36))
+            out.append(max((fw for x, y, fw, fh in faces), default=0.0) / img.shape[1])
+        except Exception:
+            out.append(0.0)
+    return out
+
+
 def check_frames(frames):
     """字幕条判定。返回 (ok, reasons, metrics)"""
     n = len(frames)
     if n < 3:
         return False, [f"帧数不足({n})"], []
     metrics, cand = [], []
+    fh_all = face_hits(frames)
     for i, f in enumerate(frames):
         im = Image.open(f).convert("L")
         mean = sum(im.resize((1, 1), Image.BOX).getdata()) / 255 * 255
@@ -226,11 +264,18 @@ def check_frames(frames):
                         "ui": bool(scr and not ppt),
                         "lines": hl + vl, "flat": round(flat, 2),
                         "bright": int(fmean), "sat": round(sat, 2),
+                        "face": round(fh_all[i], 2),
                         "ocr_words": ocr_words(f)})
         if ok:
             cand.append((i, peak, runs, cover))
 
     reasons = []
+    # 主播/口播出镜(帧级人脸检测): 明显人脸出现在多帧 => 拒
+    big = sum(1 for r in fh_all if r >= FACE_MIN_RATIO)
+    if big >= max(2, int(round(n * FACE_HIT_RATIO))):
+        reasons.append(f"人物出镜/口播 {big}/{n}帧(最大脸占比{max(fh_all):.0%})")
+        return False, reasons, metrics
+
     # 全黑/空画面
     dark = sum(1 for m in metrics if m["dark_mean"] <= DARK_MEAN)
     if dark >= max(2, int(round(n * HIT_MIN_RATIO))):

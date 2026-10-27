@@ -50,7 +50,11 @@ CHANNEL_BONUS = ["reuters", "associated press", "ap archive", "bloomberg", "cnbc
 TITLE_PENALTY = ["tutorial", "how to", "how i", "review", "vlog", "tips", "my story",
                  "reaction", "podcast", "episode", "course", "beginner", "guide",
                  "i tried", "i built", "day in the life", "explained", "walkthrough",
-                 "step by step", "top 5", "top 10", "mistakes", "secrets", "q&a"]
+                 "step by step", "top 5", "top 10", "mistakes", "secrets", "q&a",
+                 # 营销/动画页(GoFastSUPPORT.ai 那种产品宣传视频)
+                 "promo", "promotional", "animated explainer", "motion graphics",
+                 "advertisement", "commercial ad", "signup", "sign up", "pricing plan",
+                 "get started", "make more money", "boost your"]
 # 标题白名单: 实拍/素材信号词
 TITLE_BONUS = ["b-roll", "broll", "footage", "aerial", "drone", "4k", "cinematic",
                "news", "archive", "timelapse", "time lapse", "montage", "shots"]
