@@ -1,81 +1,81 @@
 {
  "jobs": [
   {
-   "key": "21_P2-1",
-   "filename": "t21_P2_1",
-   "url": "ytsearch:Ayutthaya Thailand temple tourists",
+   "key": "03_P1-1",
+   "filename": "t03_P1_1",
+   "url": "ytsearch:barber shop interior barber working b-roll",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "03_P2-1",
+   "filename": "t03_P2_1",
+   "url": "ytsearch:flower shop owner arranging bouquet b-roll",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "21_P3-1",
-   "filename": "t21_P3_1",
-   "url": "ytsearch:Thai temple prayer ritual",
+   "key": "03_P3-1",
+   "filename": "t03_P3_1",
+   "url": "ytsearch:call center agents headsets office b-roll",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "03_P4-1",
+   "filename": "t03_P4_1",
+   "url": "ytsearch:shop owner checking phone in store b-roll",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "21_P4-1",
-   "filename": "t21_P4_1",
-   "url": "ytsearch:Buddhist offering gold leaf",
+   "key": "05_P1-1",
+   "filename": "t05_P1_1",
+   "url": "ytsearch:cozy coffee shop interior barista making latte b-roll",
+   "dmin": 60,
+   "dmax": 1800,
+   "maxh": "720"
+  },
+  {
+   "key": "05_P2-1",
+   "filename": "t05_P2_1",
+   "url": "ytsearch:small retail shop owner arranging shelves b-roll",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "21_P5-1",
-   "filename": "t21_P5_1",
-   "url": "ytsearch:Thailand tourism street walk",
+   "key": "05_P3-1",
+   "filename": "t05_P3_1",
+   "url": "ytsearch:robot server restaurant moving tray b-roll",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "22_P1-1",
-   "filename": "t22_P1_1",
-   "url": "ytsearch:Chinese snacks Thailand students school",
+   "key": "05_P4-1",
+   "filename": "t05_P4_1",
+   "url": "ytsearch:self checkout scanner supermarket closeup b-roll",
    "dmin": 45,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "22_P2-1",
-   "filename": "t22_P2_1",
-   "url": "ytsearch:latiao spicy strips snack",
-   "dmin": 45,
+   "key": "05_P5-1",
+   "filename": "t05_P5_1",
+   "url": "ytsearch:retail store shopping aisle customers b-roll",
+   "dmin": 60,
    "dmax": 1800,
    "maxh": "720"
   },
   {
-   "key": "22_P3-1",
-   "filename": "t22_P3_1",
-   "url": "ytsearch:Thai school children classroom snack",
-   "dmin": 45,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "22_P4-1",
-   "filename": "t22_P4_1",
-   "url": "ytsearch:convenience store shelves Asia",
-   "dmin": 45,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "22_P5-1",
-   "filename": "t22_P5_1",
-   "url": "ytsearch:spicy snack eating reaction",
-   "dmin": 45,
-   "dmax": 1800,
-   "maxh": "720"
-  },
-  {
-   "key": "23_P1-1",
-   "filename": "t23_P1_1",
-   "url": "ytsearch:LLM API pricing AI models cost",
+   "key": "06_P1-1",
+   "filename": "t06_P1_1",
+   "url": "ytsearch:corporate executive office skyline window b-roll",
    "dmin": 60,
    "dmax": 1800,
    "maxh": "720"
