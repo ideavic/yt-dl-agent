@@ -353,7 +353,7 @@ def transcode(dest, budget_left):
         return False
     tmp = dest + ".tc.mp4"
     r = sh(["ffmpeg", "-y", "-v", "error", "-i", dest,
-            "-vf", "scale='min(1280,iw)':-2",
+            "-vf", "scale='min(1920,iw)':-2",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", tmp], 1200)
     try:
@@ -420,7 +420,7 @@ def direct_available():
 
 report = []
 _REPORT_LOCK = threading.Lock()
-JOB_PAR = int(os.environ.get("JOB_PAR", "2"))     # 并发任务数(每条走不同代理, 2 比较稳)
+JOB_PAR = int(os.environ.get("JOB_PAR", "1"))     # 用户要求: 慢慢的一个一个下, 不并发
 
 
 def add_report(item):
@@ -474,8 +474,12 @@ def run_job(idx, job):
                 if cands:
                     break
         if not cands:
-            log(f"{key} 搜索无结果")
-            add_report({"key": key, "ok": False, "why": "no-search-result"})
+            # 区分"真没结果"与"网络故障": 直连和代理全军覆没时, 换网络环境大概率能搜到,
+            # 不算这个槽位的失败次数(驱动端对 search-network-failed 不累计 attempts)
+            net_fail = bool(PROXY_ONLY) and not cands
+            log(f"{key} 搜索无结果" + ("(疑似代理/网络故障)" if net_fail else ""))
+            add_report({"key": key, "ok": False,
+                        "why": "search-network-failed" if net_fail else "no-search-result"})
             return False
     else:
         cands = [{"id": src.rsplit("=", 1)[-1], "title": "", "duration": 0}]
